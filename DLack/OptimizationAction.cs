@@ -28,6 +28,20 @@ namespace DLack
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  IMPACT LEVEL (how likely this action is to help)
+    // ═══════════════════════════════════════════════════════════════
+
+    public enum ImpactLevel
+    {
+        /// <summary>Low confidence this will noticeably help.</summary>
+        Low,
+        /// <summary>Moderate confidence — common fix for this class of issue.</summary>
+        Medium,
+        /// <summary>High confidence — directly addresses detected problem.</summary>
+        High
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  ACTION STATUS
     // ═══════════════════════════════════════════════════════════════
 
@@ -99,6 +113,16 @@ namespace DLack
         /// Human-readable verification detail (e.g. "Temp folder: 12 MB (was 1.2 GB)").
         /// </summary>
         public string VerificationMessage { get; set; } = "";
+
+        /// <summary>
+        /// How likely this action is to produce a visible improvement.
+        /// </summary>
+        public ImpactLevel Impact { get; set; } = ImpactLevel.Medium;
+
+        /// <summary>
+        /// Short rationale for the impact assessment (shown to operator).
+        /// </summary>
+        public string ImpactRationale { get; set; } = "";
     }
 
     // ═══════════════════════════════════════════════════════════════

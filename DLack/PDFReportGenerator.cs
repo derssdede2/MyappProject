@@ -146,6 +146,7 @@ namespace DLack
                 col.Spacing(14);
 
                 ComposeSummary(col, result);
+                ComposeOperatorNotes(col, result);
                 ComposeSystemOverview(col, result);
                 ComposeCpuDiagnostics(col, result);
                 ComposeRamDiagnostics(col, result);
@@ -237,6 +238,20 @@ namespace DLack
                 if (r.FlaggedIssues.Count == 0)
                     inner.Item().PaddingTop(4).Text("No issues detected \u2014 system appears healthy")
                         .FontSize(10).Bold().FontColor(GreenGood);
+            });
+        }
+
+        // ── Operator Notes ───────────────────────────────────────────
+
+        private void ComposeOperatorNotes(ColumnDescriptor col, DiagnosticResult r)
+        {
+            if (string.IsNullOrWhiteSpace(r.OperatorNotes)) return;
+
+            col.Item().Element(c => SectionHeader(c, "Operator Notes"));
+            col.Item().Border(1).BorderColor(GrayBorder).Background(GrayLight).Padding(12).Column(inner =>
+            {
+                inner.Item().Text(r.OperatorNotes)
+                    .FontSize(10).FontColor(TextDark);
             });
         }
 

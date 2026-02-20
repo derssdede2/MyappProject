@@ -24,6 +24,8 @@ namespace DLack
         public event Action<string> OnLog;
         public event Action<OptimizationAction> OnActionStatusChanged;
 
+        private readonly RollbackManager _rollback = new();
+
         // ═══════════════════════════════════════════════════════════════
         //  BUILD PLAN
         // ═══════════════════════════════════════════════════════════════
@@ -633,6 +635,7 @@ namespace DLack
                 if (string.IsNullOrEmpty(action.EstimatedDuration))
                     action.EstimatedDuration = EstimateDuration(action.ActionKey);
                 action.Type = ClassifyActionType(action);
+                AssignImpact(action, result);
             }
 
             return actions;
@@ -702,6 +705,87 @@ namespace DLack
                 return ActionType.Shortcut;
 
             return ActionType.AutoFix;
+        }
+
+        /// <summary>Assigns impact level and rationale based on the action and scan data.</summary>
+        private static void AssignImpact(OptimizationAction action, DiagnosticResult result)
+        {
+            string key = action.ActionKey;
+
+            // Disk cleanup — impact scales with reclaimable space
+            if (key is "ClearTempFiles" or "ClearPrefetch" or "EmptyRecycleBin"
+                or "ClearUpdateCache" or "CleanUpgradeLogs" or "ClearCrashDumps" or "ClearWerReports"
+                || key.StartsWith("ClearBrowserCache:"))
+            {
+                bool diskCritical = result.Disk.Drives.Any(d => d.PercentUsed > 90);
+                action.Impact = diskCritical ? ImpactLevel.High : action.EstimatedFreeMB > 500 ? ImpactLevel.Medium : ImpactLevel.Low;
+                action.ImpactRationale = diskCritical
+                    ? "Disk space critically low — freeing space directly helps"
+                    : action.EstimatedFreeMB > 500 ? "Significant space to reclaim" : "Small cleanup";
+                return;
+            }
+
+            // Windows.old removal
+            if (key == "LaunchDiskCleanup")
+            {
+                action.Impact = ImpactLevel.High;
+                action.ImpactRationale = "Windows.old can be several GB — major space recovery";
+                return;
+            }
+
+            // System repair commands — high when triggered by real events
+            if (key is "RunSfc" or "RunDism")
+            {
+                action.Impact = result.EventLog.BSODs.Count > 0 ? ImpactLevel.High : ImpactLevel.Medium;
+                action.ImpactRationale = result.EventLog.BSODs.Count > 0
+                    ? "BSODs detected — system file repair directly addresses this"
+                    : "App crashes detected — may resolve corrupted system files";
+                return;
+            }
+
+            // Chkdsk — directly addresses disk errors
+            if (key == "ScheduleChkdsk")
+            {
+                action.Impact = ImpactLevel.High;
+                action.ImpactRationale = "Disk errors detected — chkdsk directly repairs file system";
+                return;
+            }
+
+            // Power/visual changes — noticeable but not critical
+            if (key is "SetPowerPlanBalanced" or "SwitchToPerformanceVisuals" or "RepairPowerConfig")
+            {
+                action.Impact = ImpactLevel.Medium;
+                action.ImpactRationale = "Affects system responsiveness — improvement varies by hardware";
+                return;
+            }
+
+            // Fast startup / shutdown fixes
+            if (key is "DisableFastStartup")
+            {
+                action.Impact = result.EventLog.UnexpectedShutdowns.Count >= 3 ? ImpactLevel.High : ImpactLevel.Medium;
+                action.ImpactRationale = "Unexpected shutdowns detected — disabling fast startup often resolves this";
+                return;
+            }
+
+            // Process kill — immediate but temporary
+            if (key.StartsWith("KillProcess:"))
+            {
+                action.Impact = ImpactLevel.Low;
+                action.ImpactRationale = "Frees RAM now but process may restart";
+                return;
+            }
+
+            // Shortcuts/manual — low, user must take further action
+            if (action.Type == ActionType.Shortcut || action.Type == ActionType.ManualOnly)
+            {
+                action.Impact = ImpactLevel.Low;
+                action.ImpactRationale = "Opens tool for manual review";
+                return;
+            }
+
+            // Default
+            action.Impact = ImpactLevel.Medium;
+            action.ImpactRationale = "Standard maintenance action";
         }
 
         private static string EstimateDuration(string actionKey)
@@ -858,6 +942,9 @@ namespace DLack
             // flags NEW events occurring after this fix
             var remediatedCategories = GetRemediatedCategories(selected);
             SaveRemediationTimestamps(remediatedCategories);
+
+            // Persist rollback data for registry/power changes
+            _rollback.Save();
 
             summary.ActionsRun = selected.Count;
             return summary;
@@ -1488,6 +1575,10 @@ namespace DLack
             // Disable transparency
             try
             {
+                _rollback.CaptureRegistryValue(Microsoft.Win32.Registry.CurrentUser,
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize", "EnableTransparency");
+                _rollback.TagLastEntry("SwitchToPerformanceVisuals");
+
                 using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
                     @"SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize", writable: true);
                 if (key != null)
@@ -1506,6 +1597,12 @@ namespace DLack
             // Disable animations
             try
             {
+                _rollback.CaptureRegistryValue(Microsoft.Win32.Registry.CurrentUser,
+                    @"Control Panel\Desktop\WindowMetrics", "MinAnimate");
+                _rollback.CaptureRegistryValue(Microsoft.Win32.Registry.CurrentUser,
+                    @"SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects", "VisualFXSetting");
+                _rollback.TagLastEntry("SwitchToPerformanceVisuals");
+
                 using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
                     @"Control Panel\Desktop\WindowMetrics", writable: true);
                 if (key != null)
@@ -1529,6 +1626,10 @@ namespace DLack
             // Disable menu/tooltip animations via SystemParametersInfo
             try
             {
+                _rollback.CaptureRegistryValue(Microsoft.Win32.Registry.CurrentUser,
+                    @"Control Panel\Desktop", "UserPreferencesMask");
+                _rollback.TagLastEntry("SwitchToPerformanceVisuals");
+
                 using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
                     @"Control Panel\Desktop", writable: true);
                 if (key != null)
@@ -1838,6 +1939,10 @@ namespace DLack
             string detail;
             try
             {
+                _rollback.CaptureRegistryValue(Microsoft.Win32.Registry.LocalMachine,
+                    @"SYSTEM\CurrentControlSet\Control\Session Manager\Power", "HiberbootEnabled");
+                _rollback.TagLastEntry("DisableFastStartup");
+
                 using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
                     @"SYSTEM\CurrentControlSet\Control\Session Manager\Power", writable: true);
                 if (key != null)

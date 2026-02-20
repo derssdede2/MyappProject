@@ -770,6 +770,94 @@ namespace DLack
         }
 
         // ═══════════════════════════════════════════════════════════════
+        //  WHAT CHANGED SINCE LAST SCAN
+        // ═══════════════════════════════════════════════════════════════
+
+        private void BuildWhatChangedPanel(ScanSnapshot previous, ScanSnapshot current)
+        {
+            var deltas = ScanHistoryManager.CompareTo(previous, current);
+            // Only show if something actually changed
+            if (deltas.All(d => d.Direction == 0)) return;
+
+            var card = new Border
+            {
+                CornerRadius = new CornerRadius(10),
+                Background = new SolidColorBrush(ThemeManager.SurfaceAlt),
+                BorderBrush = new SolidColorBrush(ThemeManager.Border),
+                BorderThickness = new Thickness(1),
+                Padding = new Thickness(16, 12, 16, 12),
+                Margin = new Thickness(0, 0, 0, 10),
+                Opacity = 0,
+                RenderTransform = new TranslateTransform(0, 12)
+            };
+            card.Loaded += (_, _) =>
+            {
+                card.BeginAnimation(OpacityProperty,
+                    new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(450))
+                    { EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut } });
+                ((TranslateTransform)card.RenderTransform).BeginAnimation(
+                    TranslateTransform.YProperty,
+                    new DoubleAnimation(12, 0, TimeSpan.FromMilliseconds(500))
+                    { EasingFunction = new QuarticEase { EasingMode = EasingMode.EaseOut } });
+            };
+
+            var sp = new StackPanel();
+
+            // Header
+            var header = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 0, 0, 8) };
+            header.Children.Add(MdlIcon(IcoSync, 13, ThemeManager.AccentBlue));
+            header.Children.Add(new TextBlock
+            {
+                Text = $"  CHANGES SINCE {previous.Timestamp:MMM dd, h:mm tt}",
+                FontFamily = new FontFamily("Segoe UI"), FontSize = 11,
+                FontWeight = FontWeights.Bold,
+                Foreground = new SolidColorBrush(ThemeManager.AccentBlue),
+                VerticalAlignment = VerticalAlignment.Center
+            });
+            sp.Children.Add(header);
+
+            // Delta rows
+            foreach (var (metric, before, after, direction) in deltas)
+            {
+                if (direction == 0) continue;
+
+                Color fg = direction > 0 ? ThemeManager.GoodFg : ThemeManager.CritFg;
+                string arrow = direction > 0 ? "▲" : "▼";
+
+                var row = new Grid { Margin = new Thickness(0, 2, 0, 2) };
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(120) });
+                row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                var label = new TextBlock
+                {
+                    Text = metric,
+                    FontFamily = new FontFamily("Segoe UI"), FontSize = 11,
+                    Foreground = new SolidColorBrush(ThemeManager.TextMuted),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(label, 0);
+                row.Children.Add(label);
+
+                var val = new TextBlock
+                {
+                    Text = $"{before} → {after}  {arrow}",
+                    FontFamily = new FontFamily("Segoe UI"), FontSize = 11,
+                    FontWeight = FontWeights.SemiBold,
+                    Foreground = new SolidColorBrush(fg),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                Grid.SetColumn(val, 1);
+                row.Children.Add(val);
+
+                sp.Children.Add(row);
+            }
+
+            card.Child = sp;
+            // Insert after health dashboard, before metrics
+            metricsPanel.Children.Insert(0, card);
+        }
+
+        // ═══════════════════════════════════════════════════════════════
         //  BUTTON HANDLERS
         // ═══════════════════════════════════════════════════════════════
 
@@ -835,6 +923,13 @@ namespace DLack
                         _preOptimizationSnapshot = null;
                     }
 
+                    // Save scan snapshot and show "what changed since last scan"
+                    var previousSnapshot = ScanHistoryManager.GetPrevious();
+                    var currentSnapshot = ScanHistoryManager.CreateSnapshot(lastResult);
+                    ScanHistoryManager.Save(currentSnapshot);
+                    if (previousSnapshot != null)
+                        BuildWhatChangedPanel(previousSnapshot, currentSnapshot);
+
                     btnExport.Visibility = Visibility.Visible;
                     lblExportText.Text = "Export Scan Report";
                     btnOptimize.Visibility = Visibility.Visible;
@@ -866,6 +961,11 @@ namespace DLack
 
             try
             {
+                // Prompt for optional operator notes before generating PDF
+                string notes = PromptOperatorNotes();
+                if (notes == null) return; // user cancelled
+                lastResult.OperatorNotes = notes;
+
                 btnExport.IsEnabled = false;
                 btnOptimize.Visibility = Visibility.Collapsed;
                 btnScan.IsEnabled = false;
@@ -2186,6 +2286,81 @@ namespace DLack
             Log($"✗ ERROR: {ex.Message}");
             UpdateStatus("Error", IcoError, ThemeManager.BrushDanger);
             SetButtonStates(scan: true, export: lastResult != null, cancel: false, optimize: lastResult != null);
+        }
+
+        /// <summary>
+        /// Shows a dialog for the operator to add optional notes before PDF export.
+        /// Returns the notes string (may be empty), or null if the user cancelled.
+        /// </summary>
+        private string PromptOperatorNotes()
+        {
+            var dlg = new Window
+            {
+                Title = "Operator Notes",
+                Width = 480, Height = 300,
+                WindowStartupLocation = WindowStartupLocation.CenterOwner,
+                Owner = this,
+                WindowStyle = WindowStyle.ToolWindow,
+                ResizeMode = ResizeMode.NoResize,
+                Background = (SolidColorBrush)FindResource("BgCard")
+            };
+            var sp = new StackPanel { Margin = new Thickness(20) };
+            sp.Children.Add(new TextBlock
+            {
+                Text = "Add notes for this report (optional):",
+                FontFamily = new FontFamily("Segoe UI"), FontSize = 13,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = (SolidColorBrush)FindResource("TextDark"),
+                Margin = new Thickness(0, 0, 0, 8)
+            });
+            var textBox = new TextBox
+            {
+                Height = 140,
+                AcceptsReturn = true,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                FontFamily = new FontFamily("Segoe UI"), FontSize = 12,
+                Padding = new Thickness(8),
+                Background = (SolidColorBrush)FindResource("LogBg"),
+                Foreground = (SolidColorBrush)FindResource("LogFg"),
+                BorderBrush = (SolidColorBrush)FindResource("BorderBrush")
+            };
+            sp.Children.Add(textBox);
+            var btnPanel = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(0, 12, 0, 0)
+            };
+            var btnSkip = new Button
+            {
+                Content = "Skip", Width = 80, Height = 32, Margin = new Thickness(0, 0, 8, 0),
+                Style = (Style)FindResource("ModernButton"),
+                Background = (Brush)FindResource("NeutralBtnBg"),
+                Foreground = (SolidColorBrush)FindResource("NeutralBtnForeground")
+            };
+            btnSkip.Click += (_, _) => { dlg.Tag = ""; dlg.DialogResult = true; };
+            var btnOk = new Button
+            {
+                Content = "Add Notes", Width = 100, Height = 32,
+                Style = (Style)FindResource("BluePrimaryButton")
+            };
+            btnOk.Click += (_, _) => { dlg.Tag = textBox.Text ?? ""; dlg.DialogResult = true; };
+            var btnCancel = new Button
+            {
+                Content = "Cancel", Width = 80, Height = 32, Margin = new Thickness(8, 0, 0, 0),
+                Style = (Style)FindResource("ModernButton"),
+                Background = (Brush)FindResource("NeutralBtnBg"),
+                Foreground = (SolidColorBrush)FindResource("NeutralBtnForeground")
+            };
+            btnCancel.Click += (_, _) => { dlg.DialogResult = false; };
+            btnPanel.Children.Add(btnSkip);
+            btnPanel.Children.Add(btnOk);
+            btnPanel.Children.Add(btnCancel);
+            sp.Children.Add(btnPanel);
+            dlg.Content = sp;
+
+            return dlg.ShowDialog() == true ? (string)dlg.Tag : null;
         }
 
         private string GeneratePDFReport(DiagnosticResult result)

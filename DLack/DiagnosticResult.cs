@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace DLack
 {
@@ -69,6 +70,11 @@ namespace DLack
         // Optimization results — populated only after the optimizer has been run
         public List<OptimizationAction> OptimizationActions { get; set; }
         public OptimizationSummary OptimizationSummary { get; set; }
+
+        /// <summary>
+        /// Free-text notes added by the IT operator before exporting the PDF report.
+        /// </summary>
+        public string OperatorNotes { get; set; } = "";
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -465,6 +471,11 @@ namespace DLack
                 string name = message[start..space].Trim();
                 if (!string.IsNullOrEmpty(name)) return name;
             }
+
+            // Language-agnostic fallback: extract the first *.exe token from the message
+            var exeMatch = Regex.Match(message, @"\b(\w[\w.\-]+\.exe)\b", RegexOptions.IgnoreCase);
+            if (exeMatch.Success)
+                return exeMatch.Groups[1].Value;
 
             return null;
         }
