@@ -8,6 +8,8 @@
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
+        UseLayoutRounding="True"
+        SnapsToDevicePixels="True"
         KeyDown="Window_KeyDown"
         StateChanged="Window_StateChanged">
 
@@ -56,13 +58,17 @@
                             HorizontalAlignment="Right" VerticalAlignment="Top">
                     <Button x:Name="btnToggleTheme" Content="&#xEC46;" Style="{StaticResource ChromeButton}"
                             FontFamily="Segoe MDL2 Assets" FontSize="14"
-                            Click="BtnToggleTheme_Click" ToolTip="Toggle Dark/Light Mode (Ctrl+T)" />
+                            Click="BtnToggleTheme_Click" ToolTip="Toggle Dark/Light Mode (Ctrl+T)"
+                            AutomationProperties.Name="Toggle theme" />
                     <Button Content="&#xE921;" Style="{StaticResource ChromeButton}"
-                            Click="BtnMinimize_Click" ToolTip="Minimize" />
+                            Click="BtnMinimize_Click" ToolTip="Minimize"
+                            AutomationProperties.Name="Minimize" />
                     <Button x:Name="btnMaxRestore" Content="&#xE922;" Style="{StaticResource ChromeButton}"
-                            Click="BtnMaximize_Click" ToolTip="Maximize" />
+                            Click="BtnMaximize_Click" ToolTip="Maximize"
+                            AutomationProperties.Name="Maximize" />
                     <Button Content="&#xE8BB;" Style="{StaticResource ChromeCloseButton}"
-                            Click="BtnClose_Click" ToolTip="Close" />
+                            Click="BtnClose_Click" ToolTip="Close"
+                            AutomationProperties.Name="Close" />
                 </StackPanel>
 
                 <!-- Title + Logo + Subtitle + Action Buttons -->

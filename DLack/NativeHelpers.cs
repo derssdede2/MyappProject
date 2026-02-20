@@ -43,11 +43,13 @@ namespace DLack
             try
             {
                 long totalBytes = 0;
+                int clampedDepth = Math.Max(1, maxDepth);
                 var options = new EnumerationOptions
                 {
                     IgnoreInaccessible = true,
-                    RecurseSubdirectories = maxDepth > 1,
-                    MaxRecursionDepth = maxDepth
+                    AttributesToSkip = 0,
+                    RecurseSubdirectories = clampedDepth > 1,
+                    MaxRecursionDepth = clampedDepth
                 };
                 foreach (var file in Directory.EnumerateFiles(path, "*", options))
                 {

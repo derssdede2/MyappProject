@@ -158,7 +158,7 @@ namespace DLack
                 mmi.ptMinTrackSize.X = (int)(MinWidth * dpi.DpiScaleX);
                 mmi.ptMinTrackSize.Y = (int)(MinHeight * dpi.DpiScaleY);
 
-                Marshal.StructureToPtr(mmi, lParam, true);
+                Marshal.StructureToPtr(mmi, lParam, false);
                 handled = true;
             }
             return IntPtr.Zero;
@@ -684,7 +684,7 @@ namespace DLack
 
             Log("\r\n=== BEFORE → AFTER OPTIMIZATION ===");
             Log($"  Health Score: {before.HealthScore} → {after.HealthScore} ({(scoreDelta >= 0 ? "+" : "")}{scoreDelta})");
-            Log($"  Disk Free:   {FormatMB(before.DiskFreeMB)} → {FormatMB(after.DiskFreeMB)} (+{FormatMB(diskDelta)})");
+            Log($"  Disk Free:   {FormatMB(before.DiskFreeMB)} → {FormatMB(after.DiskFreeMB)} ({(diskDelta >= 0 ? "+" : "")}{FormatMB(diskDelta)})");
             Log($"  RAM Usage:   {before.RamUsedPercent}% → {after.RamUsedPercent}%");
             Log($"  Startup:     {before.StartupCount} → {after.StartupCount}");
             Log($"  Issues:      {before.IssueCount} → {after.IssueCount}");
@@ -780,8 +780,13 @@ namespace DLack
             try
             {
                 // Dispose old scanner to avoid event accumulation
-                scanner?.Dispose();
-                scanner = null;
+                if (scanner != null)
+                {
+                    scanner.OnProgress -= Scanner_OnProgress;
+                    scanner.OnLog -= Log;
+                    scanner.Dispose();
+                    scanner = null;
+                }
                 EnsureScanner();
 
                 SetButtonStates(scan: false, export: false, cancel: true);
@@ -790,6 +795,11 @@ namespace DLack
                 btnCancelIcon.Text = IcoCancel;
                 UpdateStatus("Scanning...", IcoSync, ThemeManager.BrushPrimary);
                 ShowProgress(true);
+                _lastProgressPercent = 0;
+                _lastPhaseTotal = 0;
+                progressFill.BeginAnimation(WidthProperty, null);
+                progressFill.Width = 0;
+                lblProgress.Text = "";
                 StartElapsedTimer();
 
                 Log("\r\n=== STARTING DIAGNOSTIC SCAN ===");
@@ -968,7 +978,7 @@ namespace DLack
 
         private void Scanner_OnProgress(ScanProgress progress)
         {
-            Dispatcher.Invoke(() =>
+            Dispatcher.BeginInvoke(() =>
             {
                 if (!IsLoaded) return;
                 _currentScanPhase = progress.CurrentPhase;
@@ -1373,7 +1383,7 @@ namespace DLack
             // ── Installed Software ──
             metricsPanel.Children.Add(BuildSectionHeader("INSTALLED SOFTWARE", IcoApps));
             metricsPanel.Children.Add(BuildInfoRow("Total Apps", $"{result.InstalledSoftware.TotalCount}"));
-            metricsPanel.Children.Add(BuildInfoRow("VC++ Runtimes", $"{result.InstalledSoftware.DuplicateRuntimeCount}"));
+            metricsPanel.Children.Add(BuildInfoRow("VC++ Runtimes", $"{result.InstalledSoftware.RuntimeCount}"));
             foreach (var rt in result.InstalledSoftware.RuntimeApps)
                 metricsPanel.Children.Add(BuildInfoRow($"  {rt.Name}", rt.Version));
             metricsPanel.Children.Add(BuildInfoRow("EOL Software", result.InstalledSoftware.EOLApps.Count > 0
@@ -1863,15 +1873,6 @@ namespace DLack
             scanner.OnLog += Log;
         }
 
-        private void SetMetricsText(string text)
-        {
-            // During scanning, replace the empty state with a rich step card
-            txtLiveScan.Children.Clear();
-            txtLiveScan.VerticalAlignment = VerticalAlignment.Center;
-            txtLiveScan.Visibility = Visibility.Visible;
-            metricsPanel.Visibility = Visibility.Collapsed;
-        }
-
         private static Path BuildOrbitArc(double cx, double cy, double r, double startDeg, double sweepDeg, double stroke, Color color)
         {
             double startRad = (startDeg - 90) * Math.PI / 180.0;
@@ -2184,7 +2185,7 @@ namespace DLack
             ShowProgress(false);
             Log($"✗ ERROR: {ex.Message}");
             UpdateStatus("Error", IcoError, ThemeManager.BrushDanger);
-            SetButtonStates(scan: true, export: lastResult != null, cancel: false);
+            SetButtonStates(scan: true, export: lastResult != null, cancel: false, optimize: lastResult != null);
         }
 
         private string GeneratePDFReport(DiagnosticResult result)
@@ -2321,8 +2322,13 @@ namespace DLack
         protected override void OnClosed(EventArgs e)
         {
             ThemeManager.ThemeChanged -= OnThemeChanged;
-            scanner?.CancelScan();
-            scanner?.Dispose();
+            if (scanner != null)
+            {
+                scanner.OnProgress -= Scanner_OnProgress;
+                scanner.OnLog -= Log;
+                scanner.CancelScan();
+                scanner.Dispose();
+            }
             base.OnClosed(e);
         }
     }

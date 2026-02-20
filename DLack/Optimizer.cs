@@ -622,6 +622,11 @@ namespace DLack
                 }
             }
 
+            // Deduplicate by ActionKey — the same action can be proposed by multiple
+            // diagnostic sections (e.g., ClearBrowserCache from Browser + Event Log crashes)
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            actions.RemoveAll(a => !seen.Add(a.ActionKey));
+
             foreach (var action in actions)
             {
                 // Preserve any EstimatedDuration explicitly set during plan building
@@ -649,11 +654,6 @@ namespace DLack
         {
             "OUTLOOK.EXE", "WINWORD.EXE", "EXCEL.EXE", "POWERPNT.EXE",
             "MSACCESS.EXE", "ONENOTE.EXE", "MSPUB.EXE", "lync.exe"
-        };
-
-        private static readonly HashSet<string> BrowserExecutables = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "chrome.exe", "msedge.exe", "firefox.exe"
         };
 
         /// <summary>
@@ -1461,16 +1461,19 @@ namespace DLack
             try
             {
                 using var proc = Process.GetProcessById(pid);
-                if (!proc.HasExited)
-                {
-                    long memMB = proc.WorkingSet64 / (1024 * 1024);
-                    proc.Kill(entireProcessTree: true);
-                    proc.WaitForExit(10_000);
-                    string detail = $"Ended {name} (PID {pid}, was using {memMB:N0} MB RAM)";
-                    OnLog?.Invoke($"  ✓ {detail}");
-                    return new ActionResult(Detail: detail);
-                }
-                return new ActionResult(Detail: $"{name} (PID {pid}) already exited");
+                if (proc.HasExited)
+                    return new ActionResult(Detail: $"{name} (PID {pid}) already exited");
+
+                // Guard against PID reuse — verify the process is still the one we scanned
+                if (!proc.ProcessName.Equals(name, StringComparison.OrdinalIgnoreCase))
+                    return new ActionResult(Detail: $"PID {pid} is now {proc.ProcessName}, not {name} — skipped (PID was reused)");
+
+                long memMB = proc.WorkingSet64 / (1024 * 1024);
+                proc.Kill(entireProcessTree: true);
+                proc.WaitForExit(10_000);
+                string detail = $"Ended {name} (PID {pid}, was using {memMB:N0} MB RAM)";
+                OnLog?.Invoke($"  ✓ {detail}");
+                return new ActionResult(Detail: detail);
             }
             catch (ArgumentException)
             {
@@ -1549,7 +1552,10 @@ namespace DLack
         private ActionResult SetPowerPlanBalanced()
         {
             const string balancedGuid = "381b4222-f694-41f0-9685-ff5bb260df2e";
-            RunElevatedCmd($"powercfg /setactive {balancedGuid}");
+            int exitCode = RunElevatedCmd($"powercfg /setactive {balancedGuid}");
+            if (exitCode != 0)
+                throw new InvalidOperationException($"powercfg /setactive failed (exit code {exitCode})");
+
             string detail = "Switched to Balanced power plan";
             OnLog?.Invoke($"  ✓ {detail}");
             return new ActionResult(Detail: detail);
@@ -1929,8 +1935,7 @@ namespace DLack
             if (exitCode == 0) fixes++;
 
             const string balancedGuid = "381b4222-f694-41f0-9685-ff5bb260df2e";
-            RunElevatedCmd($"powercfg /setactive {balancedGuid}");
-            fixes++;
+            if (RunElevatedCmd($"powercfg /setactive {balancedGuid}") == 0) fixes++;
 
             OnLog?.Invoke("  Disabling wake timers...");
             RunElevatedCmd($"powercfg /SETACVALUEINDEX {balancedGuid} 238c9fa8-0aad-41ed-83f4-97be242c8f20 bd3b718a-0680-4d9d-8ab2-e1d2b4ac806d 0");

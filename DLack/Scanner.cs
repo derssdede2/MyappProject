@@ -26,6 +26,7 @@ namespace DLack
         private double _cachedMaxClockMHz;
         private double _cachedCurrentClockMHz;
         private List<double> _cachedThermalZonesC;
+        private CancellationToken _phaseToken;
 
         /// <summary>
         /// When true, the Internet Speed Test phase is skipped.
@@ -52,9 +53,9 @@ namespace DLack
                 ("System Overview",         r => Task.Run(() => ScanSystemOverview(r))),
                 ("CPU Diagnostics",         r => Task.Run(() => ScanCpuDiagnostics(r))),
                 ("RAM Diagnostics",         r => Task.Run(() => ScanRamDiagnostics(r))),
-                ("GPU Diagnostics",         r => Task.Run(() => ScanGpuDiagnostics(r))),
-                ("Disk Diagnostics",        r => Task.Run(() => ScanDiskDiagnostics(r))),
                 ("Thermal Diagnostics",     r => Task.Run(() => ScanThermalDiagnostics(r))),
+                ("Disk Diagnostics",        r => Task.Run(() => ScanDiskDiagnostics(r))),
+                ("GPU Diagnostics",         r => Task.Run(() => ScanGpuDiagnostics(r))),
                 ("Battery Health",          r => Task.Run(() => ScanBatteryHealth(r))),
                 ("Startup Programs",        r => Task.Run(() => ScanStartupPrograms(r))),
                 ("Visual & Display",        r => Task.Run(() => ScanVisualSettings(r))),
@@ -81,7 +82,7 @@ namespace DLack
 
             // Record which user context this scan reflects
             result.ScannedUser = $@"{Environment.UserDomainName}\{Environment.UserName}";
-            OnLog?.Invoke($"Starting comprehensive system diagnostic scan as {result.ScannedUser}...");
+            SafeLog($"Starting comprehensive system diagnostic scan as {result.ScannedUser}...");
 
             // Snapshot top processes once — used by both CPU and RAM phases
             _topProcesses = GetTopProcessesByMemory(10);
@@ -91,14 +92,14 @@ namespace DLack
             {
                 if (_cts.Token.IsCancellationRequested)
                 {
-                    OnLog?.Invoke("Scan cancelled.");
+                    SafeLog("Scan cancelled.");
                     cancelled = true;
                     break;
                 }
 
                 var phase = phases[i];
 
-                OnProgress?.Invoke(new ScanProgress
+                SafeProgress(new ScanProgress
                 {
                     PhaseIndex = i + 1,
                     Total = phases.Length,
@@ -107,7 +108,11 @@ namespace DLack
                     EstimatedSeconds = GetPhaseEstimate(phase.Name)
                 });
 
-                OnLog?.Invoke($"[{i + 1}/{phases.Length}] {phase.Name}...");
+                SafeLog($"[{i + 1}/{phases.Length}] {phase.Name}...");
+
+                // Per-phase cancellation: cancelled on timeout so the phase stops mutating result
+                var phaseCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                _phaseToken = phaseCts.Token;
 
                 try
                 {
@@ -116,17 +121,18 @@ namespace DLack
                     if (await Task.WhenAny(phaseTask, Task.Delay(phaseTimeoutMs, _cts.Token)) == phaseTask)
                     {
                         await phaseTask; // propagate exceptions
-                        OnLog?.Invoke($"  ✓ {phase.Name} complete");
+                        SafeLog($"  ✓ {phase.Name} complete");
                     }
                     else
                     {
-                        OnLog?.Invoke($"  ⚠ {phase.Name} timed out ({phaseTimeoutMs / 1000}s) — skipping");
+                        phaseCts.Cancel(); // Stop the timed-out phase from further mutating result
+                        SafeLog($"  ⚠ {phase.Name} timed out ({phaseTimeoutMs / 1000}s) — skipping");
                     }
                 }
                 catch (OperationCanceledException) { cancelled = true; break; }
                 catch (Exception ex)
                 {
-                    OnLog?.Invoke($"  ⚠ {phase.Name} error: {ex.Message}");
+                    SafeLog($"  ⚠ {phase.Name} error: {ex.Message}");
                 }
             }
 
@@ -140,7 +146,7 @@ namespace DLack
             stopwatch.Stop();
             result.ScanDurationSeconds = Math.Round(stopwatch.Elapsed.TotalSeconds, 1);
 
-            OnLog?.Invoke($"Scan complete in {result.ScanDurationSeconds}s. {result.FlaggedIssues.Count} issue(s) flagged.");
+            SafeLog($"Scan complete in {result.ScanDurationSeconds}s. {result.FlaggedIssues.Count} issue(s) flagged.");
             return result;
         }
 
@@ -224,6 +230,7 @@ namespace DLack
 
         private void ScanCpuDiagnostics(DiagnosticResult result)
         {
+            var ct = _phaseToken;
             var cpu = result.Cpu;
 
             // Multi-sample CPU load for stable readings (3 samples, 500ms apart)
@@ -232,6 +239,7 @@ namespace DLack
                 var samples = new List<double>();
                 for (int i = 0; i < 3; i++)
                 {
+                    if (ct.IsCancellationRequested) break;
                     if (i > 0) Thread.Sleep(500);
                     using var searcher = new ManagementObjectSearcher(
                         "SELECT LoadPercentage FROM Win32_Processor");
@@ -294,11 +302,13 @@ namespace DLack
 
         private void ScanDiskDiagnostics(DiagnosticResult result)
         {
+            var ct = _phaseToken;
             var disk = result.Disk;
 
             // List all drives
             foreach (var drive in DriveInfo.GetDrives())
             {
+                if (ct.IsCancellationRequested) return;
                 if (!drive.IsReady) continue;
                 try
                 {
@@ -340,6 +350,8 @@ namespace DLack
                 disk.DiskActivityFlagged = disk.DiskActivityPercent > 50;
             }
             catch (Exception ex) { OnLog?.Invoke($"  ⚡ Disk activity: {ex.Message}"); }
+
+            if (ct.IsCancellationRequested) return;
 
             // Folder sizes (limit depth for potentially huge folders)
             string winDir = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
@@ -438,6 +450,7 @@ namespace DLack
 
         private void ScanGpuDiagnostics(DiagnosticResult result)
         {
+            var ct = _phaseToken;
             var gpu = result.Gpu;
             var allGpus = new List<GpuInfo>();
 
@@ -494,6 +507,8 @@ namespace DLack
 
             if (allGpus.Count == 0)
                 return;
+
+            if (ct.IsCancellationRequested) return;
 
             // ── Get accurate VRAM from registry for each GPU ──
             try
@@ -629,13 +644,17 @@ namespace DLack
         }
 
         /// <summary>
-        /// Runs a CLI tool and returns stdout (up to 5 s). Returns null on failure.
+        /// Runs a process and captures text output with a hard timeout.
+        /// Reads stdout and stderr asynchronously to prevent buffer deadlock.
+        /// Returns false if launch fails or the process does not exit in time.
         /// </summary>
-        private static string RunCliTool(string fileName, string arguments)
+        private static bool TryRunProcessForOutput(
+            string fileName, string arguments, int timeoutMs, out string output)
         {
+            output = "";
             try
             {
-                var psi = new ProcessStartInfo
+                using var proc = Process.Start(new ProcessStartInfo
                 {
                     FileName = fileName,
                     Arguments = arguments,
@@ -643,16 +662,41 @@ namespace DLack
                     RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc == null) return null;
-                // Read stderr asynchronously to prevent buffer deadlock
-                var stderrTask = proc.StandardError.ReadToEndAsync();
-                string output = proc.StandardOutput.ReadToEnd().Trim();
-                proc.WaitForExit(5000);
-                return string.IsNullOrWhiteSpace(output) ? null : output;
+                });
+                if (proc == null) return false;
+
+                Task<string> stdoutTask = proc.StandardOutput.ReadToEndAsync();
+                Task<string> stderrTask = proc.StandardError.ReadToEndAsync();
+
+                if (!proc.WaitForExit(timeoutMs))
+                {
+                    try { proc.Kill(entireProcessTree: true); } catch { }
+                    return false;
+                }
+
+                Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 2000);
+
+                string stdout = stdoutTask.Status == TaskStatus.RanToCompletion ? stdoutTask.Result : "";
+                string stderr = stderrTask.Status == TaskStatus.RanToCompletion ? stderrTask.Result : "";
+                output = !string.IsNullOrWhiteSpace(stdout) ? stdout.Trim() : stderr.Trim();
+                return true;
             }
-            catch { return null; }
+            catch
+            {
+                output = "";
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Runs a CLI tool and returns stdout (up to 5 s). Returns null on failure.
+        /// </summary>
+        private static string RunCliTool(string fileName, string arguments)
+        {
+            return TryRunProcessForOutput(fileName, arguments, 5000, out string output)
+                && !string.IsNullOrWhiteSpace(output)
+                ? output
+                : null;
         }
 
         /// <summary>
@@ -915,24 +959,9 @@ namespace DLack
             // BitLocker status
             try
             {
-                var psi = new ProcessStartInfo
+                if (TryRunProcessForOutput("manage-bde", "-status C:", 10_000, out string output))
                 {
-                    FileName = "manage-bde",
-                    Arguments = "-status C:",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc != null)
-                {
-                    string output = proc.StandardOutput.ReadToEnd();
-                    if (!proc.WaitForExit(10000))
-                    {
-                        try { proc.Kill(); } catch { }
-                        av.BitLockerStatus = "Check timed out";
-                    }
-                    else if (output.Contains("Fully Encrypted", StringComparison.OrdinalIgnoreCase))
+                    if (output.Contains("Fully Encrypted", StringComparison.OrdinalIgnoreCase))
                         av.BitLockerStatus = "Fully Encrypted";
                     else if (output.Contains("Fully Decrypted", StringComparison.OrdinalIgnoreCase))
                         av.BitLockerStatus = "Not Encrypted";
@@ -940,6 +969,10 @@ namespace DLack
                         av.BitLockerStatus = "Encryption In Progress";
                     else
                         av.BitLockerStatus = "Unknown";
+                }
+                else
+                {
+                    av.BitLockerStatus = "Check timed out";
                 }
             }
             catch { av.BitLockerStatus = "Unable to check"; }
@@ -977,6 +1010,7 @@ namespace DLack
 
         private void ScanNetwork(DiagnosticResult result)
         {
+            var ct = _phaseToken;
             var net = result.Network;
 
             // Connection type and adapter info
@@ -1014,20 +1048,8 @@ namespace DLack
             {
                 try
                 {
-                    var psi = new ProcessStartInfo
+                    if (TryRunProcessForOutput("netsh", "wlan show interfaces", 5000, out string output))
                     {
-                        FileName = "netsh",
-                        Arguments = "wlan show interfaces",
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        RedirectStandardOutput = true
-                    };
-                    using var proc = Process.Start(psi);
-                    if (proc != null)
-                    {
-                        string output = proc.StandardOutput.ReadToEnd();
-                        proc.WaitForExit(5000);
-
                         foreach (var line in output.Split('\n'))
                         {
                             var trimmed = line.Trim();
@@ -1052,6 +1074,8 @@ namespace DLack
                 }
                 catch { }
             }
+
+            if (ct.IsCancellationRequested) return;
 
             // DNS response time — 3-sample median for accuracy
             try
@@ -1083,6 +1107,8 @@ namespace DLack
             }
             catch { net.DnsResponseTime = "Failed"; }
 
+            if (ct.IsCancellationRequested) return;
+
             // VPN check
             try
             {
@@ -1106,22 +1132,13 @@ namespace DLack
             }
             catch { }
 
+            if (ct.IsCancellationRequested) return;
+
             // Ping latency
             try
             {
-                var psi = new ProcessStartInfo
+                if (TryRunProcessForOutput("ping", "-n 3 8.8.8.8", 15_000, out string output))
                 {
-                    FileName = "ping",
-                    Arguments = "-n 3 8.8.8.8",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc != null)
-                {
-                    string output = proc.StandardOutput.ReadToEnd();
-                    proc.WaitForExit(15000);
                     // Parse "Average = Xms"
                     var avgLine = output.Split('\n')
                         .FirstOrDefault(l => l.Contains("Average", StringComparison.OrdinalIgnoreCase) ||
@@ -1135,6 +1152,10 @@ namespace DLack
                     {
                         net.PingLatency = "Timed out";
                     }
+                }
+                else
+                {
+                    net.PingLatency = "Failed";
                 }
             }
             catch { net.PingLatency = "Failed"; }
@@ -1693,6 +1714,7 @@ namespace DLack
 
         private void ScanInstalledSoftware(DiagnosticResult result)
         {
+            var ct = _phaseToken;
             var sw = result.InstalledSoftware;
             var apps = new Dictionary<string, InstalledApp>(StringComparer.OrdinalIgnoreCase);
 
@@ -1711,6 +1733,7 @@ namespace DLack
 
                     foreach (var subKeyName in key.GetSubKeyNames())
                     {
+                        if (ct.IsCancellationRequested) return;
                         try
                         {
                             using var subKey = key.OpenSubKey(subKeyName);
@@ -1758,7 +1781,7 @@ namespace DLack
             sw.RuntimeApps = sw.Applications.Where(a =>
                 a.Name.Contains("Visual C++", StringComparison.OrdinalIgnoreCase) &&
                 a.Name.Contains("Redistributable", StringComparison.OrdinalIgnoreCase)).ToList();
-            sw.DuplicateRuntimeCount = sw.RuntimeApps.Count;
+            sw.RuntimeCount = sw.RuntimeApps.Count;
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -1767,6 +1790,7 @@ namespace DLack
 
         private void ScanEventLogs(DiagnosticResult result)
         {
+            var ct = _phaseToken;
             var el = result.EventLog;
             var baseCutoffUtc = DateTime.UtcNow.AddDays(-30);
 
@@ -1796,6 +1820,8 @@ namespace DLack
             }
             catch (Exception ex) { OnLog?.Invoke($"  ⚡ BSOD log: {ex.Message}"); }
 
+            if (ct.IsCancellationRequested) return;
+
             // Unexpected shutdowns — EventLog source, ID 6008
             try
             {
@@ -1807,6 +1833,8 @@ namespace DLack
             }
             catch (Exception ex) { OnLog?.Invoke($"  ⚡ Shutdown log: {ex.Message}"); }
 
+            if (ct.IsCancellationRequested) return;
+
             // Disk errors — disk / Ntfs / volmgr
             try
             {
@@ -1817,6 +1845,8 @@ namespace DLack
                 ReadEntries(logDisk, el.DiskErrors, 10, diskCutoff);
             }
             catch (Exception ex) { OnLog?.Invoke($"  ⚡ Disk error log: {ex.Message}"); }
+
+            if (ct.IsCancellationRequested) return;
 
             // App crashes — Application Error (1000) and Application Hang (1002)
             try
@@ -2276,12 +2306,12 @@ namespace DLack
                     Recommendation = "Consider uninstalling to improve system performance"
                 });
 
-            if (r.InstalledSoftware.DuplicateRuntimeCount > 6)
+            if (r.InstalledSoftware.RuntimeCount > 6)
                 issues.Add(new FlaggedIssue
                 {
                     Severity = Severity.Info,
                     Category = "Software",
-                    Description = $"{r.InstalledSoftware.DuplicateRuntimeCount} Visual C++ Redistributables installed",
+                    Description = $"{r.InstalledSoftware.RuntimeCount} Visual C++ Redistributables installed",
                     Recommendation = "Older versions may be safely removed if no legacy apps depend on them"
                 });
 
@@ -2474,6 +2504,24 @@ namespace DLack
         //  HELPER METHODS
         // ═══════════════════════════════════════════════════════════════
 
+        /// <summary>
+        /// Invokes OnLog inside a try/catch so a broken subscriber cannot crash the scan loop.
+        /// </summary>
+        private void SafeLog(string message)
+        {
+            try { OnLog?.Invoke(message); }
+            catch { }
+        }
+
+        /// <summary>
+        /// Invokes OnProgress inside a try/catch so a broken subscriber cannot crash the scan loop.
+        /// </summary>
+        private void SafeProgress(ScanProgress progress)
+        {
+            try { OnProgress?.Invoke(progress); }
+            catch { }
+        }
+
         private static List<ProcessInfo> GetTopProcessesByMemory(int count)
         {
             var list = new List<ProcessInfo>();
@@ -2663,18 +2711,9 @@ namespace DLack
         {
             try
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "powercfg.exe",
-                    Arguments = "/getactivescheme",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true
-                };
-                using var process = Process.Start(psi);
-                if (process == null) return "Unknown";
-                string output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit(3000);
+                if (!TryRunProcessForOutput("powercfg.exe", "/getactivescheme", 3000, out string output))
+                    return "Unknown";
+
                 int start = output.LastIndexOf('(');
                 int end = output.LastIndexOf(')');
                 if (start >= 0 && end > start)

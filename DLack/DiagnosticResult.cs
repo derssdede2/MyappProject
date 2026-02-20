@@ -261,8 +261,6 @@ namespace DLack
     {
         public string AntivirusName { get; set; } = "Unknown";
         public bool FullScanRunning { get; set; }
-        public double AntivirusCpuPercent { get; set; }
-        public double AntivirusDiskPercent { get; set; }
         public string BitLockerStatus { get; set; } = "Unknown";
     }
 
@@ -394,7 +392,7 @@ namespace DLack
         public List<InstalledApp> EOLApps { get; set; } = new();
         public List<InstalledApp> BloatwareApps { get; set; } = new();
         public List<InstalledApp> RuntimeApps { get; set; } = new();
-        public int DuplicateRuntimeCount { get; set; }
+        public int RuntimeCount { get; set; }
     }
 
     public class InstalledApp
@@ -501,6 +499,5 @@ namespace DLack
         public string Name { get; set; } = "";
         public int Id { get; set; }
         public long MemoryMB { get; set; }
-        public double CpuPercent { get; set; }
     }
 }

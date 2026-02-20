@@ -24,7 +24,6 @@ namespace DLack
         private static readonly BackEase EaseOutBack = new() { EasingMode = EasingMode.EaseOut, Amplitude = 0.4 };
 
         private readonly long _targetFreedMB;
-        private readonly bool _hasFailures;
         private readonly bool _reviewOnly;
         private DispatcherTimer _autoVerifyTimer;
         private int _autoVerifyCountdown = 5;
@@ -45,7 +44,6 @@ namespace DLack
             _actions = actions;
             _summary = summary;
             _targetFreedMB = summary.TotalFreedMB;
-            _hasFailures = summary.FailureCount > 0;
             _reviewOnly = reviewOnly;
 
             // Set initial state — everything hidden for orchestrated entrance
@@ -457,18 +455,21 @@ namespace DLack
         //  EVENT HANDLERS
         // ═══════════════════════════════════════════════════════════════
 
-        private void BtnVerify_Click(object sender, RoutedEventArgs e)
+        private void CleanupWindowState()
         {
             _autoVerifyTimer?.Stop();
+            _autoVerifyTimer = null;
             ThemeManager.ThemeChanged -= OnThemeChanged;
+        }
+
+        private void BtnVerify_Click(object sender, RoutedEventArgs e)
+        {
             ShouldRescan = true;
             Close();
         }
 
         private void BtnClose_Click(object sender, RoutedEventArgs e)
         {
-            _autoVerifyTimer?.Stop();
-            ThemeManager.ThemeChanged -= OnThemeChanged;
             Close();
         }
 
@@ -476,11 +477,15 @@ namespace DLack
         {
             if (e.Key == System.Windows.Input.Key.Escape)
             {
-                _autoVerifyTimer?.Stop();
-                ThemeManager.ThemeChanged -= OnThemeChanged;
                 Close();
                 e.Handled = true;
             }
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            CleanupWindowState();
+            base.OnClosed(e);
         }
 
         private void OnThemeChanged()
