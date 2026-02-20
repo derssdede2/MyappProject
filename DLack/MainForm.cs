@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Drawing;
+using System.IO;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using FontAwesome.Sharp;
@@ -333,11 +334,12 @@ namespace DLack
                 Log("\r\n=== POST-OPTIMIZATION SCAN ===");
                 ShowProgress(true);
 
+                EnsureScanner();
                 afterScan = await scanner.RunScan(30);
 
                 ShowProgress(false);
 
-                if (afterScan != null)
+                if (afterScan?.SampleCount > 0)
                 {
                     result.AfterScan = afterScan;
                     DisplayComparison(beforeScan, afterScan);
@@ -355,8 +357,15 @@ namespace DLack
                         $"Optimization complete!\r\n\r\nReport saved to:\r\n{pdfPath}",
                         "Success", MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
+                else
+                {
+                    UpdateStatus("Post-scan cancelled", IconChar.TimesCircle, RedDanger);
+                    Log("✗ Post-optimization scan was cancelled. PDF report was not generated.");
+                }
 
                 btnScan.Enabled = true;
+                btnOptimize.Enabled = false;
+                btnCancel.Enabled = false;
             }
             catch (Exception ex)
             {
@@ -591,7 +600,12 @@ namespace DLack
             string computerName = Environment.MachineName;
             string timestamp = DateTime.Now.ToString("yyyyMMdd_HHmm");
             string filename = $"DLack_{computerName}_{timestamp}.pdf";
-            string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            string desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            if (string.IsNullOrWhiteSpace(desktopPath) || !Directory.Exists(desktopPath))
+                desktopPath = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments);
+            if (string.IsNullOrWhiteSpace(desktopPath) || !Directory.Exists(desktopPath))
+                desktopPath = Environment.CurrentDirectory;
+
             string fullPath = System.IO.Path.Combine(desktopPath, filename);
 
             new PDFReportGenerator().Generate(fullPath, result);
@@ -615,13 +629,19 @@ namespace DLack
         {
             if (disposing)
             {
-                FontHeader?.Dispose();
-                FontButton?.Dispose();
-                FontSectionHead?.Dispose();
-                FontMetrics?.Dispose();
-                FontLog?.Dispose();
-                FontStatus?.Dispose();
-                FontSmall?.Dispose();
+                if (scanner != null)
+                {
+                    scanner.OnProgress -= Scanner_OnProgress;
+                    scanner.OnLog -= Log;
+                    scanner.Dispose();
+                    scanner = null;
+                }
+
+                if (optimizer != null)
+                {
+                    optimizer.OnLog -= Log;
+                    optimizer = null;
+                }
             }
             base.Dispose(disposing);
         }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -18,6 +18,9 @@ namespace DLack
 
         public OptimizationResult RunOptimizations(ScanResult beforeScan)
         {
+            if (beforeScan == null)
+                throw new ArgumentNullException(nameof(beforeScan));
+
             var result = new OptimizationResult
             {
                 BeforeScan = beforeScan,
@@ -27,7 +30,7 @@ namespace DLack
             OnLog?.Invoke("=== Starting Optimizations ===");
 
             // 1. High Performance power plan
-            if (beforeScan.PowerPlan != "High performance")
+            if (!string.Equals(beforeScan.PowerPlan, "High performance", StringComparison.OrdinalIgnoreCase))
             {
                 result.PowerPlanChanged = SetHighPerformancePowerPlan();
             }
@@ -95,31 +98,60 @@ namespace DLack
             try
             {
                 OnLog?.Invoke("Applying Performance Visual Mode...");
+                bool applied = true;
 
                 // Set to "Custom" visual effects
-                using (var key = Registry.CurrentUser.OpenSubKey(
-                    @"Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects", true))
+                using (var key = Registry.CurrentUser.CreateSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Explorer\VisualEffects"))
                 {
-                    key?.SetValue("VisualFXSetting", 2, RegistryValueKind.DWord);
+                    if (key == null)
+                    {
+                        OnLog?.Invoke("⚠ Could not open VisualEffects registry key");
+                        applied = false;
+                    }
+                    else
+                    {
+                        key.SetValue("VisualFXSetting", 2, RegistryValueKind.DWord);
+                    }
                 }
 
                 // Disable animations but keep font smoothing enabled
-                using (var key = Registry.CurrentUser.OpenSubKey(@"Control Panel\Desktop", true))
+                using (var key = Registry.CurrentUser.CreateSubKey(@"Control Panel\Desktop"))
                 {
-                    key?.SetValue("UserPreferencesMask",
-                        new byte[] { 0x90, 0x12, 0x03, 0x80, 0x10, 0x00, 0x00, 0x00 },
-                        RegistryValueKind.Binary);
+                    if (key == null)
+                    {
+                        OnLog?.Invoke("⚠ Could not open Desktop registry key");
+                        applied = false;
+                    }
+                    else
+                    {
+                        key.SetValue("UserPreferencesMask",
+                            new byte[] { 0x90, 0x12, 0x03, 0x80, 0x10, 0x00, 0x00, 0x00 },
+                            RegistryValueKind.Binary);
+                    }
                 }
 
                 // Disable minimize animation
-                using (var key = Registry.CurrentUser.OpenSubKey(
-                    @"Control Panel\Desktop\WindowMetrics", true))
+                using (var key = Registry.CurrentUser.CreateSubKey(
+                    @"Control Panel\Desktop\WindowMetrics"))
                 {
-                    key?.SetValue("MinAnimate", "0", RegistryValueKind.String);
+                    if (key == null)
+                    {
+                        OnLog?.Invoke("⚠ Could not open WindowMetrics registry key");
+                        applied = false;
+                    }
+                    else
+                    {
+                        key.SetValue("MinAnimate", "0", RegistryValueKind.String);
+                    }
                 }
 
-                OnLog?.Invoke("✓ Performance Visual Mode applied");
-                return true;
+                if (applied)
+                    OnLog?.Invoke("✓ Performance Visual Mode applied");
+                else
+                    OnLog?.Invoke("⚠ Performance Visual Mode partially applied");
+
+                return applied;
             }
             catch (Exception ex)
             {
@@ -330,6 +362,13 @@ namespace DLack
             if (process == null) return false;
 
             bool exited = process.WaitForExit(ProcessTimeoutMs);
+            if (!exited)
+            {
+                try { process.Kill(entireProcessTree: true); }
+                catch { }
+                return false;
+            }
+
             return exited && process.ExitCode == 0;
         }
 

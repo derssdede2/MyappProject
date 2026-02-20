@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -20,8 +20,11 @@ namespace DLack
         private PerformanceCounter _cpuCounter;
         private volatile bool _cpuCounterReady;
         private bool _disposed;
-        private string _cachedTopProcess = "N/A";
+        private string _cachedTopCpuProcess = "N/A";
+        private string _cachedTopRamProcess = "N/A";
         private int _processPollCounter;
+        private readonly Dictionary<int, TimeSpan> _lastProcessCpuTimes = new();
+        private DateTime _lastProcessSnapshotUtc = DateTime.MinValue;
 
         // ═══════════════════════════════════════════════════════════════
         //  PUBLIC API
@@ -29,10 +32,14 @@ namespace DLack
 
         public async Task<ScanResult> RunScan(int durationSeconds = 60)
         {
+            if (durationSeconds <= 0)
+                durationSeconds = 1;
+
             _cts?.Dispose();
             _cts = new CancellationTokenSource();
 
             var samples = new List<SystemMetrics>(durationSeconds);
+            bool wasCancelled = false;
 
             OnLog?.Invoke($"Starting {durationSeconds}-second system scan...");
 
@@ -45,6 +52,7 @@ namespace DLack
                 if (_cts.Token.IsCancellationRequested)
                 {
                     OnLog?.Invoke($"Scan cancelled at {i} seconds.");
+                    wasCancelled = true;
                     break;
                 }
 
@@ -65,6 +73,15 @@ namespace DLack
                     OnLog?.Invoke($"Sample {i + 1}/{durationSeconds} — CPU {metrics.CpuPercent}% | RAM {metrics.RamPercent}%");
 
                 await SafeDelay(1000);
+            }
+
+            if (_cts.Token.IsCancellationRequested)
+                wasCancelled = true;
+
+            if (wasCancelled)
+            {
+                OnLog?.Invoke("Scan was cancelled. Discarding partial samples.");
+                return new ScanResult();
             }
 
             OnLog?.Invoke("Scan complete. Analyzing results...");
@@ -134,18 +151,19 @@ namespace DLack
 
                 // ── Top processes (poll every 5s to reduce overhead) ──
                 _processPollCounter++;
-                if (_processPollCounter >= 5 || _cachedTopProcess == "N/A")
+                if (_processPollCounter >= 5 || _cachedTopCpuProcess == "N/A" || _cachedTopRamProcess == "N/A")
                 {
                     var (topCpu, topRam) = GetTopProcesses();
-                    _cachedTopProcess = topRam;
+                    _cachedTopCpuProcess = topCpu;
+                    _cachedTopRamProcess = topRam;
                     metrics.TopCpuProcess = topCpu;
                     metrics.TopRamProcess = topRam;
                     _processPollCounter = 0;
                 }
                 else
                 {
-                    metrics.TopCpuProcess = _cachedTopProcess;
-                    metrics.TopRamProcess = _cachedTopProcess;
+                    metrics.TopCpuProcess = _cachedTopCpuProcess;
+                    metrics.TopRamProcess = _cachedTopRamProcess;
                 }
             }
             catch (Exception ex)
@@ -185,41 +203,87 @@ namespace DLack
             catch { return 0; }
         }
 
-        private static (string topCpu, string topRam) GetTopProcesses()
+        private (string topCpu, string topRam) GetTopProcesses()
         {
             string topCpu = "N/A";
             string topRam = "N/A";
+            var snapshotUtc = DateTime.UtcNow;
+            double elapsedMs = _lastProcessSnapshotUtc == DateTime.MinValue
+                ? 0
+                : (snapshotUtc - _lastProcessSnapshotUtc).TotalMilliseconds;
+            var activeProcessIds = new HashSet<int>();
 
             try
             {
                 var procs = Process.GetProcesses();
+                try
+                {
+                    string ramName = "N/A";
+                    long ramBytes = -1;
+                    string cpuName = "N/A";
+                    double cpuPercent = -1;
 
-                // Top by RAM (WorkingSet64 is always available)
-                var ramTop = procs
-                    .Where(p => !string.IsNullOrEmpty(p.ProcessName))
-                    .OrderByDescending(p =>
+                    foreach (var p in procs)
                     {
-                        try { return p.WorkingSet64; }
-                        catch { return 0L; }
-                    })
-                    .FirstOrDefault();
+                        try
+                        {
+                            if (string.IsNullOrWhiteSpace(p.ProcessName))
+                                continue;
 
-                if (ramTop != null)
-                {
-                    long ramMB = ramTop.WorkingSet64 / 1024 / 1024;
-                    topRam = $"{ramTop.ProcessName} ({ramMB} MB)";
-                    topCpu = topRam; // Best approximation without per-process CPU counters
+                            activeProcessIds.Add(p.Id);
+
+                            long workingSet = p.WorkingSet64;
+                            if (workingSet > ramBytes)
+                            {
+                                ramBytes = workingSet;
+                                ramName = p.ProcessName;
+                            }
+
+                            TimeSpan totalCpu = p.TotalProcessorTime;
+                            if (elapsedMs > 0 && _lastProcessCpuTimes.TryGetValue(p.Id, out var previousCpu))
+                            {
+                                double deltaMs = (totalCpu - previousCpu).TotalMilliseconds;
+                                double currentCpu = deltaMs / (elapsedMs * Environment.ProcessorCount) * 100;
+                                if (currentCpu > cpuPercent)
+                                {
+                                    cpuPercent = currentCpu;
+                                    cpuName = p.ProcessName;
+                                }
+                            }
+
+                            _lastProcessCpuTimes[p.Id] = totalCpu;
+                        }
+                        catch { }
+                    }
+
+                    if (ramBytes >= 0)
+                        topRam = $"{ramName} ({ramBytes / (1024 * 1024)} MB)";
+
+                    if (cpuPercent >= 0)
+                        topCpu = $"{cpuName} ({cpuPercent:F1}% CPU)";
+                    else if (topRam != "N/A")
+                        topCpu = topRam;
                 }
-
-                // Dispose process objects to prevent handle leaks
-                foreach (var p in procs)
+                finally
                 {
-                    try { p.Dispose(); }
-                    catch { }
+                    // Dispose process objects to prevent handle leaks
+                    foreach (var p in procs)
+                    {
+                        try { p.Dispose(); }
+                        catch { }
+                    }
                 }
             }
             catch { }
 
+            if (_lastProcessCpuTimes.Count > 0)
+            {
+                var staleIds = _lastProcessCpuTimes.Keys.Where(id => !activeProcessIds.Contains(id)).ToList();
+                foreach (var staleId in staleIds)
+                    _lastProcessCpuTimes.Remove(staleId);
+            }
+
+            _lastProcessSnapshotUtc = snapshotUtc;
             return (topCpu, topRam);
         }
 
@@ -260,8 +324,8 @@ namespace DLack
                 BrowserProcessCount = GetBrowserCount(),
 
                 // Top processes
-                TopCpuProcesses = GetTopNProcesses(10),
-                TopRamProcesses = GetTopNProcesses(10)
+                TopCpuProcesses = GetTopNProcessesByCpu(10),
+                TopRamProcesses = GetTopNProcessesByMemory(10)
             };
 
             result.Recommendations = GenerateRecommendations(result);
@@ -288,8 +352,14 @@ namespace DLack
                 using var process = Process.Start(psi);
                 if (process == null) return "Unknown";
 
+                if (!process.WaitForExit(3000))
+                {
+                    try { process.Kill(entireProcessTree: true); }
+                    catch { }
+                    return "Unknown";
+                }
+
                 string output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit(3000);
 
                 // Output format: "Power Scheme GUID: xxx  (Plan Name)"
                 // Extract the name between parentheses
@@ -356,7 +426,7 @@ namespace DLack
             catch { return 0; }
         }
 
-        private static List<ProcessInfo> GetTopNProcesses(int count)
+        private static List<ProcessInfo> GetTopNProcessesByMemory(int count)
         {
             var list = new List<ProcessInfo>();
 
@@ -402,6 +472,63 @@ namespace DLack
             return list;
         }
 
+        private static List<ProcessInfo> GetTopNProcessesByCpu(int count)
+        {
+            var list = new List<ProcessInfo>();
+
+            try
+            {
+                var procs = Process.GetProcesses();
+                try
+                {
+                    var cpuSamples = new List<ProcessInfo>();
+
+                    foreach (var p in procs)
+                    {
+                        try
+                        {
+                            if (string.IsNullOrWhiteSpace(p.ProcessName))
+                                continue;
+
+                            double uptimeSeconds = (DateTime.Now - p.StartTime).TotalSeconds;
+                            if (uptimeSeconds <= 0.5)
+                                continue;
+
+                            double cpuPercent =
+                                p.TotalProcessorTime.TotalSeconds /
+                                (uptimeSeconds * Environment.ProcessorCount) * 100.0;
+
+                            cpuSamples.Add(new ProcessInfo
+                            {
+                                Name = p.ProcessName,
+                                Id = p.Id,
+                                MemoryMB = p.WorkingSet64 / (1024 * 1024),
+                                CpuPercent = Math.Round(Math.Max(cpuPercent, 0), 1)
+                            });
+                        }
+                        catch { }
+                    }
+
+                    list = cpuSamples
+                        .OrderByDescending(p => p.CpuPercent)
+                        .ThenByDescending(p => p.MemoryMB)
+                        .Take(count)
+                        .ToList();
+                }
+                finally
+                {
+                    foreach (var p in procs)
+                    {
+                        try { p.Dispose(); }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
+
+            return list;
+        }
+
         // ═══════════════════════════════════════════════════════════════
         //  RECOMMENDATIONS
         // ═══════════════════════════════════════════════════════════════
@@ -410,7 +537,7 @@ namespace DLack
         {
             var recs = new List<string>();
 
-            if (result.PowerPlan != "High performance")
+            if (!string.Equals(result.PowerPlan, "High performance", StringComparison.OrdinalIgnoreCase))
                 recs.Add("Set power plan to High Performance");
 
             if (result.AvgCpu >= 80)
@@ -566,5 +693,6 @@ namespace DLack
         public string Name { get; set; }
         public int Id { get; set; }
         public long MemoryMB { get; set; }
+        public double CpuPercent { get; set; }
     }
 }
