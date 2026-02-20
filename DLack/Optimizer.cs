@@ -1039,8 +1039,15 @@ namespace DLack
                     });
                     if (proc != null)
                     {
-                        string output = proc.StandardOutput.ReadToEnd();
-                        proc.WaitForExit(5000);
+                        Task<string> outputTask = proc.StandardOutput.ReadToEndAsync();
+                        if (!proc.WaitForExit(5000))
+                        {
+                            try { proc.Kill(entireProcessTree: true); } catch { }
+                            return (VerificationStatus.PartiallyVerified, "Could not confirm power plan (command timed out)");
+                        }
+                        if (!outputTask.Wait(500))
+                            return (VerificationStatus.PartiallyVerified, "Could not confirm power plan output");
+                        string output = outputTask.Result;
                         return output.Contains("381b4222-f694-41f0-9685-ff5bb260df2e")
                             ? (VerificationStatus.Verified, "Balanced power plan is active")
                             : (VerificationStatus.NotVerified, "Balanced plan is not active");

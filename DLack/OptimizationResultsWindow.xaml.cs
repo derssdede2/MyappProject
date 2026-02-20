@@ -426,6 +426,7 @@ namespace DLack
             _autoVerifyCountdown = 5;
             UpdateVerifyText();
 
+            _autoVerifyTimer?.Stop();
             _autoVerifyTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _autoVerifyTimer.Tick += (_, _) =>
             {
@@ -457,18 +458,21 @@ namespace DLack
         //  EVENT HANDLERS
         // ═══════════════════════════════════════════════════════════════
 
-        private void BtnVerify_Click(object sender, RoutedEventArgs e)
+        private void CleanupWindowState()
         {
             _autoVerifyTimer?.Stop();
+            _autoVerifyTimer = null;
             ThemeManager.ThemeChanged -= OnThemeChanged;
+        }
+
+        private void BtnVerify_Click(object sender, RoutedEventArgs e)
+        {
             ShouldRescan = true;
             Close();
         }
 
         private void BtnClose_Click(object sender, RoutedEventArgs e)
         {
-            _autoVerifyTimer?.Stop();
-            ThemeManager.ThemeChanged -= OnThemeChanged;
             Close();
         }
 
@@ -476,11 +480,15 @@ namespace DLack
         {
             if (e.Key == System.Windows.Input.Key.Escape)
             {
-                _autoVerifyTimer?.Stop();
-                ThemeManager.ThemeChanged -= OnThemeChanged;
                 Close();
                 e.Handled = true;
             }
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            CleanupWindowState();
+            base.OnClosed(e);
         }
 
         private void OnThemeChanged()

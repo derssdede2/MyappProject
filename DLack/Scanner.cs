@@ -52,9 +52,9 @@ namespace DLack
                 ("System Overview",         r => Task.Run(() => ScanSystemOverview(r))),
                 ("CPU Diagnostics",         r => Task.Run(() => ScanCpuDiagnostics(r))),
                 ("RAM Diagnostics",         r => Task.Run(() => ScanRamDiagnostics(r))),
+                ("Thermal Diagnostics",     r => Task.Run(() => ScanThermalDiagnostics(r))),
                 ("GPU Diagnostics",         r => Task.Run(() => ScanGpuDiagnostics(r))),
                 ("Disk Diagnostics",        r => Task.Run(() => ScanDiskDiagnostics(r))),
-                ("Thermal Diagnostics",     r => Task.Run(() => ScanThermalDiagnostics(r))),
                 ("Battery Health",          r => Task.Run(() => ScanBatteryHealth(r))),
                 ("Startup Programs",        r => Task.Run(() => ScanStartupPrograms(r))),
                 ("Visual & Display",        r => Task.Run(() => ScanVisualSettings(r))),
@@ -111,15 +111,34 @@ namespace DLack
 
                 try
                 {
-                    var phaseTask = phase.Action(result);
+                    // Run each phase against an isolated result object so a timed-out
+                    // phase cannot continue mutating the shared final result in the background.
+                    var phaseResult = new DiagnosticResult();
+                    var phaseTask = phase.Action(phaseResult);
                     int phaseTimeoutMs = GetPhaseTimeoutMs(phase.Name);
-                    if (await Task.WhenAny(phaseTask, Task.Delay(phaseTimeoutMs, _cts.Token)) == phaseTask)
+                    var timeoutTask = Task.Delay(phaseTimeoutMs, _cts.Token);
+
+                    if (await Task.WhenAny(phaseTask, timeoutTask) == phaseTask)
                     {
                         await phaseTask; // propagate exceptions
+                        MergePhaseResult(result, phaseResult, phase.Name);
                         OnLog?.Invoke($"  ✓ {phase.Name} complete");
+                    }
+                    else if (_cts.Token.IsCancellationRequested)
+                    {
+                        // Phase work cannot be force-cancelled (sync WMI/process APIs), so
+                        // let it finish in the background without surfacing unobserved faults.
+                        _ = phaseTask.ContinueWith(t => _ = t.Exception,
+                            TaskContinuationOptions.OnlyOnFaulted);
+                        cancelled = true;
+                        break;
                     }
                     else
                     {
+                        // Timed out phase may still be running. Keep going with the next phase,
+                        // but discard late writes by isolating phase output in phaseResult.
+                        _ = phaseTask.ContinueWith(t => _ = t.Exception,
+                            TaskContinuationOptions.OnlyOnFaulted);
                         OnLog?.Invoke($"  ⚠ {phase.Name} timed out ({phaseTimeoutMs / 1000}s) — skipping");
                     }
                 }
@@ -148,6 +167,81 @@ namespace DLack
         {
             try { _cts?.Cancel(); }
             catch (ObjectDisposedException) { }
+        }
+
+        private static void MergePhaseResult(DiagnosticResult target, DiagnosticResult phase, string phaseName)
+        {
+            switch (phaseName)
+            {
+                case "System Overview":
+                    target.SystemOverview = phase.SystemOverview;
+                    break;
+                case "CPU Diagnostics":
+                    target.Cpu.CpuLoadPercent = phase.Cpu.CpuLoadPercent;
+                    target.Cpu.CpuLoadFlagged = phase.Cpu.CpuLoadFlagged;
+                    target.Cpu.TopCpuProcesses = phase.Cpu.TopCpuProcesses;
+                    break;
+                case "RAM Diagnostics":
+                    target.Ram = phase.Ram;
+                    break;
+                case "GPU Diagnostics":
+                    target.Gpu = phase.Gpu;
+                    break;
+                case "Disk Diagnostics":
+                    target.Disk = phase.Disk;
+                    break;
+                case "Thermal Diagnostics":
+                    target.Cpu.CpuTemperatureC = phase.Cpu.CpuTemperatureC;
+                    target.Cpu.TemperatureFlagged = phase.Cpu.TemperatureFlagged;
+                    target.Cpu.IsThrottling = phase.Cpu.IsThrottling;
+                    target.Cpu.FanStatus = phase.Cpu.FanStatus;
+                    break;
+                case "Battery Health":
+                    target.Battery = phase.Battery;
+                    break;
+                case "Startup Programs":
+                    target.Startup = phase.Startup;
+                    break;
+                case "Visual & Display":
+                    target.VisualSettings = phase.VisualSettings;
+                    break;
+                case "Antivirus & Security":
+                    target.Antivirus = phase.Antivirus;
+                    break;
+                case "Windows Update":
+                    target.WindowsUpdate = phase.WindowsUpdate;
+                    break;
+                case "Network Diagnostics":
+                    target.Network = phase.Network;
+                    break;
+                case "Internet Speed Test":
+                    target.Network.DownloadSpeedMbps = phase.Network.DownloadSpeedMbps;
+                    target.Network.UploadSpeedMbps = phase.Network.UploadSpeedMbps;
+                    target.Network.SpeedTestFlagged = phase.Network.SpeedTestFlagged;
+                    target.Network.SpeedTestError = phase.Network.SpeedTestError;
+                    break;
+                case "Network Drives":
+                    target.NetworkDrives = phase.NetworkDrives;
+                    break;
+                case "Outlook / Email":
+                    target.Outlook = phase.Outlook;
+                    break;
+                case "Browser Check":
+                    target.Browser = phase.Browser;
+                    break;
+                case "User Profile":
+                    target.UserProfile = phase.UserProfile;
+                    break;
+                case "Office Diagnostics":
+                    target.Office = phase.Office;
+                    break;
+                case "Installed Software":
+                    target.InstalledSoftware = phase.InstalledSoftware;
+                    break;
+                case "Event Log Analysis":
+                    target.EventLog = phase.EventLog;
+                    break;
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -633,9 +727,22 @@ namespace DLack
         /// </summary>
         private static string RunCliTool(string fileName, string arguments)
         {
+            return TryRunProcessForOutput(fileName, arguments, timeoutMs: 5000, out string output)
+                && !string.IsNullOrWhiteSpace(output)
+                ? output
+                : null;
+        }
+
+        /// <summary>
+        /// Runs a process and captures text output with a hard timeout.
+        /// Returns false if launch fails or the process does not exit in time.
+        /// </summary>
+        private static bool TryRunProcessForOutput(string fileName, string arguments, int timeoutMs, out string output)
+        {
+            output = "";
             try
             {
-                var psi = new ProcessStartInfo
+                using var proc = Process.Start(new ProcessStartInfo
                 {
                     FileName = fileName,
                     Arguments = arguments,
@@ -643,16 +750,31 @@ namespace DLack
                     RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc == null) return null;
-                // Read stderr asynchronously to prevent buffer deadlock
-                var stderrTask = proc.StandardError.ReadToEndAsync();
-                string output = proc.StandardOutput.ReadToEnd().Trim();
-                proc.WaitForExit(5000);
-                return string.IsNullOrWhiteSpace(output) ? null : output;
+                });
+                if (proc == null) return false;
+
+                Task<string> stdoutTask = proc.StandardOutput.ReadToEndAsync();
+                Task<string> stderrTask = proc.StandardError.ReadToEndAsync();
+
+                if (!proc.WaitForExit(timeoutMs))
+                {
+                    try { proc.Kill(entireProcessTree: true); } catch { }
+                    try { proc.WaitForExit(2000); } catch { }
+                    return false;
+                }
+
+                Task.WaitAll(new Task[] { stdoutTask, stderrTask }, 2000);
+
+                string stdout = stdoutTask.Status == TaskStatus.RanToCompletion ? stdoutTask.Result : "";
+                string stderr = stderrTask.Status == TaskStatus.RanToCompletion ? stderrTask.Result : "";
+                output = !string.IsNullOrWhiteSpace(stdout) ? stdout.Trim() : stderr.Trim();
+                return true;
             }
-            catch { return null; }
+            catch
+            {
+                output = "";
+                return false;
+            }
         }
 
         /// <summary>
@@ -915,24 +1037,9 @@ namespace DLack
             // BitLocker status
             try
             {
-                var psi = new ProcessStartInfo
+                if (TryRunProcessForOutput("manage-bde", "-status C:", 10_000, out string output))
                 {
-                    FileName = "manage-bde",
-                    Arguments = "-status C:",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc != null)
-                {
-                    string output = proc.StandardOutput.ReadToEnd();
-                    if (!proc.WaitForExit(10000))
-                    {
-                        try { proc.Kill(); } catch { }
-                        av.BitLockerStatus = "Check timed out";
-                    }
-                    else if (output.Contains("Fully Encrypted", StringComparison.OrdinalIgnoreCase))
+                    if (output.Contains("Fully Encrypted", StringComparison.OrdinalIgnoreCase))
                         av.BitLockerStatus = "Fully Encrypted";
                     else if (output.Contains("Fully Decrypted", StringComparison.OrdinalIgnoreCase))
                         av.BitLockerStatus = "Not Encrypted";
@@ -940,6 +1047,10 @@ namespace DLack
                         av.BitLockerStatus = "Encryption In Progress";
                     else
                         av.BitLockerStatus = "Unknown";
+                }
+                else
+                {
+                    av.BitLockerStatus = "Check timed out";
                 }
             }
             catch { av.BitLockerStatus = "Unable to check"; }
@@ -1014,20 +1125,8 @@ namespace DLack
             {
                 try
                 {
-                    var psi = new ProcessStartInfo
+                    if (TryRunProcessForOutput("netsh", "wlan show interfaces", 5000, out string output))
                     {
-                        FileName = "netsh",
-                        Arguments = "wlan show interfaces",
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                        RedirectStandardOutput = true
-                    };
-                    using var proc = Process.Start(psi);
-                    if (proc != null)
-                    {
-                        string output = proc.StandardOutput.ReadToEnd();
-                        proc.WaitForExit(5000);
-
                         foreach (var line in output.Split('\n'))
                         {
                             var trimmed = line.Trim();
@@ -1109,19 +1208,8 @@ namespace DLack
             // Ping latency
             try
             {
-                var psi = new ProcessStartInfo
+                if (TryRunProcessForOutput("ping", "-n 3 8.8.8.8", 15_000, out string output))
                 {
-                    FileName = "ping",
-                    Arguments = "-n 3 8.8.8.8",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc != null)
-                {
-                    string output = proc.StandardOutput.ReadToEnd();
-                    proc.WaitForExit(15000);
                     // Parse "Average = Xms"
                     var avgLine = output.Split('\n')
                         .FirstOrDefault(l => l.Contains("Average", StringComparison.OrdinalIgnoreCase) ||
@@ -1135,6 +1223,10 @@ namespace DLack
                     {
                         net.PingLatency = "Timed out";
                     }
+                }
+                else
+                {
+                    net.PingLatency = "Failed";
                 }
             }
             catch { net.PingLatency = "Failed"; }
@@ -2663,18 +2755,15 @@ namespace DLack
         {
             try
             {
-                var psi = new ProcessStartInfo
+                if (!TryRunProcessForOutput(
+                    fileName: "powercfg.exe",
+                    arguments: "/getactivescheme",
+                    timeoutMs: 3000,
+                    output: out string output))
                 {
-                    FileName = "powercfg.exe",
-                    Arguments = "/getactivescheme",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true
-                };
-                using var process = Process.Start(psi);
-                if (process == null) return "Unknown";
-                string output = process.StandardOutput.ReadToEnd();
-                process.WaitForExit(3000);
+                    return "Unknown";
+                }
+
                 int start = output.LastIndexOf('(');
                 int end = output.LastIndexOf(')');
                 if (start >= 0 && end > start)
