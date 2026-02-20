@@ -22,8 +22,10 @@ namespace DLack
                     return;
                 }
 
-                base.OnStartup(e);
+                // Load/apply theme before StartupUri creates MainWindow so controls
+                // (including theme-toggle icon) initialize against the persisted mode.
                 ThemeManager.Initialize();
+                base.OnStartup(e);
             }
             catch (Exception ex)
             {
