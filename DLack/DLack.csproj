@@ -2,12 +2,19 @@
 	<PropertyGroup>
 		<OutputType>WinExe</OutputType>
 		<TargetFramework>net8.0-windows</TargetFramework>
-		<UseWindowsForms>true</UseWindowsForms>
+		<UseWPF>true</UseWPF>
 		<ApplicationManifest>app.manifest</ApplicationManifest>
 	</PropertyGroup>
 	<ItemGroup>
-	  <PackageReference Include="FontAwesome.Sharp" Version="6.6.0" />
 	  <PackageReference Include="QuestPDF" Version="2025.12.4" />
 	  <PackageReference Include="System.Management" Version="10.0.3" />
+	  <PackageReference Include="System.ServiceProcess.ServiceController" Version="9.0.3" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Page Include="App.xaml" />
+	</ItemGroup>
+	<ItemGroup>
+	  <None Remove="Assets\*.png" />
+	  <Resource Include="Assets\*.png" />
 	</ItemGroup>
 </Project>

@@ -1,0 +1,105 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ── Professional Light Theme — Endpoint Diagnostics ── -->
+
+    <!-- Core Colors -->
+    <Color x:Key="BluePrimaryColor">#9B4D2B</Color>
+    <Color x:Key="BlueDarkColor">#7A1F2E</Color>
+    <Color x:Key="BlueLightColor">#C76E3F</Color>
+    <Color x:Key="GreenSuccessColor">#1B7A3D</Color>
+    <Color x:Key="RedDangerColor">#B91C1C</Color>
+    <Color x:Key="TextDarkColor">#111827</Color>
+    <Color x:Key="TextMutedColor">#6B7280</Color>
+    <Color x:Key="BgMainColor">#F3F4F6</Color>
+    <Color x:Key="BgCardColor">#FFFFFF</Color>
+    <Color x:Key="BorderColor">#E5E7EB</Color>
+    <Color x:Key="DisabledBgColor">#E5E7EB</Color>
+    <Color x:Key="DisabledFgColor">#9CA3AF</Color>
+
+    <!-- Core Brushes -->
+    <SolidColorBrush x:Key="BluePrimary" Color="{StaticResource BluePrimaryColor}" />
+    <SolidColorBrush x:Key="BlueDark" Color="{StaticResource BlueDarkColor}" />
+    <SolidColorBrush x:Key="BlueLight" Color="{StaticResource BlueLightColor}" />
+    <SolidColorBrush x:Key="GreenSuccess" Color="{StaticResource GreenSuccessColor}" />
+    <SolidColorBrush x:Key="RedDanger" Color="{StaticResource RedDangerColor}" />
+    <SolidColorBrush x:Key="TextDark" Color="{StaticResource TextDarkColor}" />
+    <SolidColorBrush x:Key="TextMuted" Color="{StaticResource TextMutedColor}" />
+    <SolidColorBrush x:Key="BgMain" Color="{StaticResource BgMainColor}" />
+    <SolidColorBrush x:Key="BgCard" Color="{StaticResource BgCardColor}" />
+    <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}" />
+
+    <!-- Header Gradient — deeper, more luxurious -->
+    <LinearGradientBrush x:Key="HeaderBg" StartPoint="0,0" EndPoint="1,0.3">
+        <GradientStop Color="#5C1425" Offset="0" />
+        <GradientStop Color="#7A1F2E" Offset="0.3" />
+        <GradientStop Color="#9B4D2B" Offset="0.7" />
+        <GradientStop Color="#B86530" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- Neutral / Cancel Buttons -->
+    <LinearGradientBrush x:Key="NeutralBtnBg" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#F9FAFB" Offset="0" />
+        <GradientStop Color="#F3F4F6" Offset="1" />
+    </LinearGradientBrush>
+    <SolidColorBrush x:Key="NeutralBtnBorder" Color="#D1D5DB" />
+    <SolidColorBrush x:Key="NeutralBtnForeground" Color="#1F2937" />
+
+    <!-- Progress Bar -->
+    <SolidColorBrush x:Key="ProgressTrackBg" Color="#E5E7EB" />
+    <LinearGradientBrush x:Key="ProgressFillBg" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#7A1F2E" Offset="0" />
+        <GradientStop Color="#9B4D2B" Offset="0.4" />
+        <GradientStop Color="#C76E3F" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- Log Pane -->
+    <SolidColorBrush x:Key="LogBg" Color="#F9FAFB" />
+    <SolidColorBrush x:Key="LogFg" Color="#1F2937" />
+    <SolidColorBrush x:Key="LogCaret" Color="#6B7280" />
+    <SolidColorBrush x:Key="LogTimestamp" Color="#9CA3AF" />
+    <SolidColorBrush x:Key="WarnFg" Color="#B48200" />
+    <SolidColorBrush x:Key="SuccessFg" Color="#1B7A3D" />
+    <SolidColorBrush x:Key="DangerFg" Color="#B91C1C" />
+
+    <!-- Chrome / Header Text -->
+    <SolidColorBrush x:Key="ChromeHoverBg" Color="#22FFFFFF" />
+    <SolidColorBrush x:Key="HeaderTitleFg" Color="White" />
+    <SolidColorBrush x:Key="HeaderSubtitleFg" Color="#F5D5B8" />
+    <SolidColorBrush x:Key="ToggleThemeFg" Color="White" />
+
+    <!-- Theme-aware button gradients -->
+    <LinearGradientBrush x:Key="PrimaryBtnGrad" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#D4652F" Offset="0" />
+        <GradientStop Color="#A0522D" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="SuccessBtnGrad" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#388E3C" Offset="0" />
+        <GradientStop Color="#2E7D32" Offset="1" />
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="SecondaryBtnGrad" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#9B2335" Offset="0" />
+        <GradientStop Color="#8B2332" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- Tooltip -->
+    <SolidColorBrush x:Key="TooltipBg" Color="#1F2937" />
+    <SolidColorBrush x:Key="TooltipFg" Color="#F9FAFB" />
+    <SolidColorBrush x:Key="TooltipBorder" Color="#374151" />
+
+    <!-- ── Custom Scrollbar — thin, modern, rounded ── -->
+    <Style TargetType="ScrollBar">
+        <Setter Property="Width" Value="6" />
+        <Setter Property="MinWidth" Value="6" />
+        <Setter Property="Background" Value="Transparent" />
+        <Setter Property="Opacity" Value="0.45" />
+        <Style.Triggers>
+            <Trigger Property="Orientation" Value="Horizontal">
+                <Setter Property="Height" Value="6" />
+                <Setter Property="MinHeight" Value="6" />
+                <Setter Property="Width" Value="Auto" />
+            </Trigger>
+        </Style.Triggers>
+    </Style>
+
+</ResourceDictionary>

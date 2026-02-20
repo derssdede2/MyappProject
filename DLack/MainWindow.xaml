@@ -1,0 +1,416 @@
+<Window x:Class="DLack.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Endpoint Diagnostics &amp; Remediation"
+        Width="1400" Height="860"
+        MinWidth="1200" MinHeight="700"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        KeyDown="Window_KeyDown"
+        StateChanged="Window_StateChanged">
+
+    <!-- Custom Window Chrome — removes default title bar, keeps resize/snap -->
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="36"
+                      ResizeBorderThickness="6"
+                      GlassFrameThickness="0"
+                      CornerRadius="14"
+                      UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <!-- Outer rounded border wraps the entire window content -->
+    <Border x:Name="WindowBorder" CornerRadius="14"
+            Background="{DynamicResource BgMain}"
+            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="32" ShadowDepth="2"
+                              Opacity="0.22" Color="Black"
+                              Direction="270" />
+        </Border.Effect>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />  <!-- Header -->
+                <RowDefinition Height="*" />     <!-- Content -->
+                <RowDefinition Height="Auto" />  <!-- Status Bar -->
+            </Grid.RowDefinitions>
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!--  HEADER BAR                                                -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <Border x:Name="HeaderBorder" Grid.Row="0" Background="{DynamicResource HeaderBg}" CornerRadius="13,13,0,0">
+            <!-- Subtle inner highlight for depth -->
+            <Border CornerRadius="13,13,0,0" BorderThickness="0,0,0,1"
+                    BorderBrush="#10FFFFFF">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" /> <!-- Chrome buttons row -->
+                    <RowDefinition Height="*" />    <!-- Content row -->
+                </Grid.RowDefinitions>
+
+                <!-- Window Chrome Buttons (top-right, own row) -->
+                <StackPanel Grid.Row="0" Orientation="Horizontal"
+                            x:Name="chromeButtonPanel"
+                            WindowChrome.IsHitTestVisibleInChrome="True"
+                            HorizontalAlignment="Right" VerticalAlignment="Top">
+                    <Button x:Name="btnToggleTheme" Content="&#xEC46;" Style="{StaticResource ChromeButton}"
+                            FontFamily="Segoe MDL2 Assets" FontSize="14"
+                            Click="BtnToggleTheme_Click" ToolTip="Toggle Dark/Light Mode (Ctrl+T)" />
+                    <Button Content="&#xE921;" Style="{StaticResource ChromeButton}"
+                            Click="BtnMinimize_Click" ToolTip="Minimize" />
+                    <Button x:Name="btnMaxRestore" Content="&#xE922;" Style="{StaticResource ChromeButton}"
+                            Click="BtnMaximize_Click" ToolTip="Maximize" />
+                    <Button Content="&#xE8BB;" Style="{StaticResource ChromeCloseButton}"
+                            Click="BtnClose_Click" ToolTip="Close" />
+                </StackPanel>
+
+                <!-- Title + Logo + Subtitle + Action Buttons -->
+                <Grid Grid.Row="1" Margin="32,0,32,16" MinHeight="60">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <!-- Logo -->
+                        <Image x:Name="headerLogo"
+                               Source="/Assets/pillsbury-logo-white.png"
+                               Height="40" Stretch="Uniform"
+                               VerticalAlignment="Center"
+                               RenderOptions.BitmapScalingMode="HighQuality" />
+                        <!-- Subtle divider (visibility tied to logo in code-behind) -->
+                        <Border x:Name="logoDivider" Width="1" Height="36" Opacity="0.3" Background="White"
+                                VerticalAlignment="Center" Margin="16,0" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="Endpoint Diagnostics &amp; Remediation"
+                                       FontFamily="Segoe UI" FontSize="22" FontWeight="SemiBold"
+                                       Foreground="White" />
+                            <TextBlock x:Name="lblHeaderSubtitle" Text="IT-grade scanning and automated fixes"
+                                       FontFamily="Segoe UI" FontSize="11" Opacity="0.8"
+                                       Foreground="{DynamicResource HeaderSubtitleFg}"
+                                       Margin="1,-1,0,0"
+                                       TextTrimming="CharacterEllipsis" />
+                        </StackPanel>
+                    </StackPanel>
+
+                    <!-- Header Buttons -->
+                    <StackPanel Orientation="Horizontal"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                WindowChrome.IsHitTestVisibleInChrome="True">
+                        <Button x:Name="btnScan"
+                                Style="{StaticResource BluePrimaryButton}"
+                                Width="170" Height="44"
+                                Click="BtnScan_Click"
+                                ToolTip="Run Diagnostic (Ctrl+R)">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="btnScanIcon" Text="&#xE9D9;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <TextBlock x:Name="btnScanLabel" Text="Run Diagnostic" FontFamily="Segoe UI" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="btnExport"
+                                Style="{StaticResource GreenSuccessButton}"
+                                Height="44"
+                                Margin="10,0,0,0"
+                                Padding="16,0"
+                                Visibility="Collapsed"
+                                Click="BtnExport_Click"
+                                ToolTip="Export PDF Report (Ctrl+E)">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE8B5;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <TextBlock x:Name="lblExportText" Text="Export Report" FontFamily="Segoe UI" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="btnOptimize"
+                                Style="{StaticResource BlueDarkButton}"
+                                Width="140" Height="44"
+                                Margin="10,0,0,0"
+                                Visibility="Collapsed"
+                                Click="BtnOptimize_Click"
+                                ToolTip="Optimize System (Ctrl+O)">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="&#xE713;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <TextBlock Text="Optimize" FontFamily="Segoe UI" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="btnCancel"
+                                Style="{StaticResource BlueDarkButton}"
+                                Width="110" Height="44"
+                                Margin="10,0,0,0"
+                                IsEnabled="False"
+                                Click="BtnCancel_Click"
+                                ToolTip="Cancel Scan (Esc)">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock x:Name="btnCancelIcon" Text="&#xE711;" FontFamily="Segoe MDL2 Assets" FontSize="14" VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <TextBlock x:Name="btnCancelLabel" Text="Cancel" FontFamily="Segoe UI" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </Grid>
+            </Grid>
+            </Border>
+        </Border>
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!--  CONTENT AREA — Two Cards                                  -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <Grid Grid.Row="1" Margin="24,16,24,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.5*" />
+                <ColumnDefinition Width="16" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- ── SYSTEM METRICS CARD ── -->
+            <Border Grid.Column="0" Background="{DynamicResource BgCard}" CornerRadius="16"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="20" ShadowDepth="1"
+                                      Opacity="0.06" Color="Black"
+                                      Direction="270" />
+                </Border.Effect>
+                <Grid Margin="24,20">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Card Header -->
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="&#xE80A;" FontFamily="Segoe MDL2 Assets" FontSize="16" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource BluePrimary}" />
+                        <TextBlock Text="DIAGNOSTIC RESULTS"
+                                   FontFamily="Segoe UI" FontSize="14" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextDark}"
+                                   Margin="10,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <!-- Divider -->
+                    <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderBrush}" Margin="0,0,0,12" />
+
+                    <!-- Animated Progress Bar -->
+                    <Grid Grid.Row="2" x:Name="progressPanel" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+                        <Border Grid.Row="0" Height="6" CornerRadius="3" Background="{DynamicResource ProgressTrackBg}" ClipToBounds="True">
+                            <Grid>
+                                <Border x:Name="progressFill"
+                                        Height="6" CornerRadius="3"
+                                        HorizontalAlignment="Left" Width="0"
+                                        Background="{DynamicResource ProgressFillBg}" />
+                                <!-- Shimmer overlay -->
+                                <Border Height="6" CornerRadius="3" ClipToBounds="True">
+                                    <Border.Background>
+                                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                            <GradientStop Color="Transparent" Offset="0" />
+                                            <GradientStop Color="#30FFFFFF" Offset="0.5" />
+                                            <GradientStop Color="Transparent" Offset="1" />
+                                        </LinearGradientBrush>
+                                    </Border.Background>
+                                    <Border.RenderTransform>
+                                        <TranslateTransform x:Name="shimmerTranslate" X="-300" />
+                                    </Border.RenderTransform>
+                                    <Border.Triggers>
+                                        <EventTrigger RoutedEvent="Loaded">
+                                            <BeginStoryboard>
+                                                <Storyboard RepeatBehavior="Forever">
+                                                    <DoubleAnimation Storyboard.TargetName="shimmerTranslate"
+                                                                     Storyboard.TargetProperty="X"
+                                                                     From="-300" To="900"
+                                                                     Duration="0:0:1.8" />
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </EventTrigger>
+                                    </Border.Triggers>
+                                </Border>
+                            </Grid>
+                        </Border>
+                        <TextBlock Grid.Row="1" x:Name="lblProgress"
+                                   FontFamily="Segoe UI" FontSize="11"
+                                   Foreground="{DynamicResource TextMuted}"
+                                   HorizontalAlignment="Center"
+                                   Margin="0,6,0,10" />
+                    </Grid>
+
+                    <!-- Health Summary Dashboard -->
+                    <Border Grid.Row="3" x:Name="healthDashboard" Visibility="Collapsed" Margin="0,0,0,12">
+                        <WrapPanel x:Name="healthCards" Orientation="Horizontal" HorizontalAlignment="Center" />
+                    </Border>
+
+                    <!-- Metrics Display Area -->
+                    <ScrollViewer x:Name="metricsScrollViewer" Grid.Row="4" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                                  Padding="0,0,4,0">
+                        <Grid>
+                            <!-- Empty State -->
+                            <StackPanel x:Name="txtLiveScan" VerticalAlignment="Center" HorizontalAlignment="Center"
+                                        Margin="0,40,0,0">
+                                <TextBlock x:Name="emptyStateIcon" Text="&#xE721;" FontFamily="Segoe MDL2 Assets" FontSize="48"
+                                           HorizontalAlignment="Center" Margin="0,0,0,20"
+                                           Foreground="{DynamicResource BluePrimary}" Opacity="0.35">
+                                    <TextBlock.RenderTransform>
+                                        <ScaleTransform x:Name="breatheScale" ScaleX="1" ScaleY="1" CenterX="12" CenterY="12" />
+                                    </TextBlock.RenderTransform>
+                                    <TextBlock.Triggers>
+                                        <EventTrigger RoutedEvent="Loaded">
+                                            <BeginStoryboard>
+                                                <Storyboard RepeatBehavior="Forever" AutoReverse="True">
+                                                    <DoubleAnimation Storyboard.TargetName="breatheScale"
+                                                                     Storyboard.TargetProperty="ScaleX"
+                                                                     To="1.08" Duration="0:0:2.5">
+                                                        <DoubleAnimation.EasingFunction>
+                                                            <SineEase EasingMode="EaseInOut" />
+                                                        </DoubleAnimation.EasingFunction>
+                                                    </DoubleAnimation>
+                                                    <DoubleAnimation Storyboard.TargetName="breatheScale"
+                                                                     Storyboard.TargetProperty="ScaleY"
+                                                                     To="1.08" Duration="0:0:2.5">
+                                                        <DoubleAnimation.EasingFunction>
+                                                            <SineEase EasingMode="EaseInOut" />
+                                                        </DoubleAnimation.EasingFunction>
+                                                    </DoubleAnimation>
+                                                </Storyboard>
+                                            </BeginStoryboard>
+                                        </EventTrigger>
+                                    </TextBlock.Triggers>
+                                </TextBlock>
+                                <TextBlock Text="Ready to Scan"
+                                           FontFamily="Segoe UI" FontSize="22" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource TextDark}"
+                                           HorizontalAlignment="Center" Margin="0,0,0,10" />
+
+                                <!-- Guided bullets -->
+                                <StackPanel x:Name="emptyStateBullets" HorizontalAlignment="Center" Margin="0,0,0,18">
+                                    <TextBlock FontFamily="Segoe UI" FontSize="12"
+                                               Foreground="{DynamicResource TextMuted}"
+                                               HorizontalAlignment="Center" TextAlignment="Center"
+                                               Opacity="0.7">
+                                        Runs 20 checks across CPU, RAM, disk, security, and network
+                                    </TextBlock>
+                                    <TextBlock FontFamily="Segoe UI" FontSize="12"
+                                               Foreground="{DynamicResource TextMuted}"
+                                               HorizontalAlignment="Center" TextAlignment="Center"
+                                               Opacity="0.7" Margin="0,2,0,0">
+                                        Takes about 30–90 seconds depending on your system
+                                    </TextBlock>
+                                    <TextBlock FontFamily="Segoe UI" FontSize="12"
+                                               Foreground="{DynamicResource TextMuted}"
+                                               HorizontalAlignment="Center" TextAlignment="Center"
+                                               Opacity="0.7" Margin="0,2,0,0">
+                                        Exports a detailed PDF report when finished
+                                    </TextBlock>
+                                </StackPanel>
+                            </StackPanel>
+                            <!-- Rich visual results -->
+                            <StackPanel x:Name="metricsPanel" Visibility="Collapsed" Margin="0,0,0,8" />
+                        </Grid>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+
+            <!-- ── ACTIVITY LOG CARD ── -->
+            <Border Grid.Column="2" Background="{DynamicResource BgCard}" CornerRadius="16"
+                    BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="20" ShadowDepth="1"
+                                      Opacity="0.06" Color="Black"
+                                      Direction="270" />
+                </Border.Effect>
+                <Grid Margin="24,20">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Card Header -->
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,12">
+                        <TextBlock Text="&#xE7C3;" FontFamily="Segoe MDL2 Assets" FontSize="16" VerticalAlignment="Center"
+                                   Foreground="{DynamicResource BluePrimary}" />
+                        <TextBlock Text="ACTIVITY LOG"
+                                   FontFamily="Segoe UI" FontSize="14" FontWeight="Bold"
+                                   Foreground="{DynamicResource TextDark}"
+                                   Margin="10,0,0,0" VerticalAlignment="Center" />
+                    </StackPanel>
+
+                    <!-- Divider -->
+                    <Border Grid.Row="1" Height="1" Background="{DynamicResource BorderBrush}" Margin="0,0,0,12" />
+
+                    <!-- Log Text -->
+                    <Border Grid.Row="2" CornerRadius="12" Background="{DynamicResource LogBg}"
+                            BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                            Padding="14,12" ClipToBounds="True">
+                        <RichTextBox x:Name="txtLog"
+                                 FontFamily="Cascadia Code, Cascadia Mono, Consolas" FontSize="11.5"
+                                 Background="Transparent"
+                                 Foreground="{DynamicResource LogFg}"
+                                 CaretBrush="{DynamicResource LogCaret}"
+                                 BorderThickness="0"
+                                 IsReadOnly="True"
+                                 AcceptsReturn="True"
+                                 VerticalScrollBarVisibility="Auto"
+                                 IsDocumentEnabled="True">
+                            <RichTextBox.Document>
+                                <FlowDocument PageWidth="2000" />
+                            </RichTextBox.Document>
+                            <RichTextBox.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem Header="Copy All to Clipboard" Click="CopyLog_Click">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE8C8;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem Header="Clear Log (Ctrl+L)" Click="ClearLog_Click">
+                                        <MenuItem.Icon>
+                                            <TextBlock Text="&#xE74D;" FontFamily="Segoe MDL2 Assets" FontSize="12" />
+                                        </MenuItem.Icon>
+                                    </MenuItem>
+                                </ContextMenu>
+                            </RichTextBox.ContextMenu>
+                        </RichTextBox>
+                    </Border>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <!--  STATUS BAR                                                -->
+        <!-- ═══════════════════════════════════════════════════════════ -->
+        <Border Grid.Row="2" Background="{DynamicResource BgCard}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0"
+                CornerRadius="0,0,13,13">
+            <Grid Margin="24,10">
+                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                    <Border CornerRadius="4" Padding="6,2" Margin="0,0,8,0"
+                            Background="{DynamicResource ProgressTrackBg}">
+                        <TextBlock x:Name="statusIcon" Text="&#xE73E;"
+                                   FontFamily="Segoe MDL2 Assets"
+                                   FontSize="11" Foreground="{DynamicResource GreenSuccess}"
+                                   VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock x:Name="lblStatus" Text="Ready"
+                               FontFamily="Segoe UI" FontSize="12" FontWeight="Medium"
+                               Foreground="{DynamicResource GreenSuccess}"
+                               VerticalAlignment="Center" />
+                    <!-- Elapsed time during scan -->
+                    <Border x:Name="elapsedPanel" Visibility="Collapsed" Margin="16,0,0,0">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="&#xE916;" FontFamily="Segoe MDL2 Assets" FontSize="10"
+                                       Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"
+                                       Margin="0,0,5,0" Opacity="0.7" />
+                            <TextBlock x:Name="lblElapsed" Text="0:00"
+                                       FontFamily="Cascadia Code, Consolas" FontSize="11"
+                                       Foreground="{DynamicResource TextMuted}"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+                <TextBlock x:Name="lblAppVersion"
+                           FontFamily="Segoe UI" FontSize="11"
+                           Foreground="{DynamicResource TextMuted}" Opacity="0.6"
+                           HorizontalAlignment="Right" VerticalAlignment="Center" />
+            </Grid>
+        </Border>
+    </Grid>
+    </Border>
+</Window>
