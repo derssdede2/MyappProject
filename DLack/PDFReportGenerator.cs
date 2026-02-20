@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
@@ -19,6 +19,13 @@ namespace DLack
 
         public void Generate(string filePath, OptimizationResult result)
         {
+            if (string.IsNullOrWhiteSpace(filePath))
+                throw new ArgumentException("Report output path is required.", nameof(filePath));
+            if (result == null)
+                throw new ArgumentNullException(nameof(result));
+            if (result.BeforeScan == null)
+                throw new ArgumentException("BeforeScan data is required to generate a report.", nameof(result));
+
             QuestPDF.Settings.License = LicenseType.Community;
 
             Document.Create(container =>
@@ -204,6 +211,9 @@ namespace DLack
                     diskDelta, "%", lowerIsBetter: false, isAlt: false);
 
                 // Power Plan
+                bool powerPlanChanged = after != null &&
+                    !string.Equals(before.PowerPlan, after.PowerPlan, StringComparison.OrdinalIgnoreCase);
+
                 table.Cell().Element(c => DataCell(c, false))
                     .Text("Power Plan").FontSize(10);
                 table.Cell().Element(c => DataCell(c, false))
@@ -211,9 +221,9 @@ namespace DLack
                 table.Cell().Element(c => DataCell(c, false))
                     .Text(after?.PowerPlan ?? "–").FontSize(10);
                 table.Cell().Element(c => DataCell(c, false))
-                    .Text(before.PowerPlan != after?.PowerPlan ? "Changed" : "–")
+                    .Text(powerPlanChanged ? "Changed" : "–")
                     .FontSize(10)
-                    .FontColor(before.PowerPlan != after?.PowerPlan ? GreenGood : GrayMuted);
+                    .FontColor(powerPlanChanged ? GreenGood : GrayMuted);
             });
         }
 
