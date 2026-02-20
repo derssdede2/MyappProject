@@ -473,7 +473,7 @@ namespace DLack
             // Query all thermal zones once and cache for GPU fallback
             try
             {
-                _cachedThermalZonesC = new List<double>();
+                var thermalZones = new List<double>();
                 using var searcher = new ManagementObjectSearcher(
                     @"root\WMI", "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
                 searcher.Options.Timeout = TimeSpan.FromSeconds(5);
@@ -482,11 +482,12 @@ namespace DLack
                     double kelvinTenths = Convert.ToDouble(obj["CurrentTemperature"]);
                     double celsius = Math.Round((kelvinTenths / 10.0) - 273.15, 1);
                     if (celsius > 0 && celsius < 120)
-                        _cachedThermalZonesC.Add(celsius);
+                        thermalZones.Add(celsius);
                 }
+                _cachedThermalZonesC = thermalZones;
                 // First zone is typically CPU
-                if (_cachedThermalZonesC.Count > 0)
-                    cpu.CpuTemperatureC = _cachedThermalZonesC[0];
+                if (thermalZones.Count > 0)
+                    cpu.CpuTemperatureC = thermalZones[0];
             }
             catch (Exception ex) { cpu.CpuTemperatureC = 0; OnLog?.Invoke($"  ⚡ Thermal: {ex.Message}"); }
 
@@ -678,11 +679,12 @@ namespace DLack
             }
 
             // ── Fallback temperature: use cached thermal zones from ScanThermalDiagnostics ──
-            if (gpu.GpuTemperatureC <= 0 && _cachedThermalZonesC is { Count: >= 2 })
+            var thermalZones = _cachedThermalZonesC?.ToArray() ?? Array.Empty<double>();
+            if (gpu.GpuTemperatureC <= 0 && thermalZones.Length >= 2)
             {
                 // If there are 2+ zones with >5°C difference, second zone is likely GPU
-                if (Math.Abs(_cachedThermalZonesC[0] - _cachedThermalZonesC[1]) > 5)
-                    gpu.GpuTemperatureC = _cachedThermalZonesC[1];
+                if (Math.Abs(thermalZones[0] - thermalZones[1]) > 5)
+                    gpu.GpuTemperatureC = thermalZones[1];
             }
 
             gpu.TemperatureFlagged = gpu.GpuTemperatureC > 85;
