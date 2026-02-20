@@ -876,6 +876,10 @@ namespace DLack
 
             if (r.InstalledSoftware.Applications.Count > 0)
             {
+                const int maxApps = 200;
+                var appsToShow = r.InstalledSoftware.Applications.Take(maxApps).ToList();
+                int remaining = r.InstalledSoftware.Applications.Count - appsToShow.Count;
+
                 col.Item().Table(table =>
                 {
                     table.ColumnsDefinition(cd =>
@@ -891,7 +895,7 @@ namespace DLack
                                 .Text(label).FontSize(8).Bold().FontColor(Colors.White);
                     });
                     int i = 0;
-                    foreach (var app in r.InstalledSoftware.Applications)
+                    foreach (var app in appsToShow)
                     {
                         bool alt = i++ % 2 == 1;
                         table.Cell().Element(c => DataCell(c, alt)).Text(app.Name).FontSize(8);
@@ -899,6 +903,11 @@ namespace DLack
                         table.Cell().Element(c => DataCell(c, alt)).Text(app.Publisher).FontSize(8);
                     }
                 });
+
+                if (remaining > 0)
+                    col.Item().PaddingTop(4)
+                        .Text($"+ {remaining} more application(s) not shown")
+                        .FontSize(8).Italic().FontColor(GrayMuted);
             }
         }
 
@@ -1062,6 +1071,8 @@ namespace DLack
             ColumnDescriptor col, OptimizationSummary summary, List<OptimizationAction> actions)
         {
             int succeeded = actions.Count(a => a.Status == ActionStatus.Success);
+            int partial = actions.Count(a => a.Status == ActionStatus.PartialSuccess);
+            int noChange = actions.Count(a => a.Status == ActionStatus.NoChange);
             int failed = actions.Count(a => a.Status == ActionStatus.Failed);
             int skipped = actions.Count(a => a.Status == ActionStatus.Skipped);
             int manual = actions.Count(a => !a.IsAutomatable);
@@ -1092,6 +1103,24 @@ namespace DLack
                             badge.AutoItem().Width(10).Height(10).Background(GreenGood);
                             badge.AutoItem().PaddingLeft(4)
                                 .Text($"{succeeded} Succeeded").FontSize(9).Bold().FontColor(GreenGood);
+                        });
+                    }
+                    if (partial > 0)
+                    {
+                        row.AutoItem().PaddingRight(12).Row(badge =>
+                        {
+                            badge.AutoItem().Width(10).Height(10).Background(AmberWarn);
+                            badge.AutoItem().PaddingLeft(4)
+                                .Text($"{partial} Partial").FontSize(9).Bold().FontColor(AmberWarn);
+                        });
+                    }
+                    if (noChange > 0)
+                    {
+                        row.AutoItem().PaddingRight(12).Row(badge =>
+                        {
+                            badge.AutoItem().Width(10).Height(10).Background(GrayMuted);
+                            badge.AutoItem().PaddingLeft(4)
+                                .Text($"{noChange} No Change").FontSize(9).FontColor(GrayMuted);
                         });
                     }
                     if (failed > 0)
@@ -1156,6 +1185,8 @@ namespace DLack
                     string statusLabel = action.Status switch
                     {
                         ActionStatus.Success => "\u2713 Done",
+                        ActionStatus.PartialSuccess => "~ Partial",
+                        ActionStatus.NoChange => "\u2014 No Change",
                         ActionStatus.Failed => "\u2717 Failed",
                         ActionStatus.Skipped => "Skipped",
                         ActionStatus.Pending => "Not run",
@@ -1164,6 +1195,8 @@ namespace DLack
                     string statusColor = action.Status switch
                     {
                         ActionStatus.Success => GreenGood,
+                        ActionStatus.PartialSuccess => AmberWarn,
+                        ActionStatus.NoChange => GrayMuted,
                         ActionStatus.Failed => RedBad,
                         ActionStatus.Skipped => GrayMuted,
                         _ => TextDark
@@ -1329,7 +1362,7 @@ namespace DLack
                     .Text($"{label}:")
                     .FontSize(9).Bold().FontColor(GrayMuted);
                 row.RelativeItem()
-                    .Text(value)
+                    .Text(string.IsNullOrWhiteSpace(value) ? "\u2014" : value)
                     .FontSize(9).FontColor(TextDark);
             });
         }

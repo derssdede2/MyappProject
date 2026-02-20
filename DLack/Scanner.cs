@@ -1852,7 +1852,7 @@ namespace DLack
             sw.RuntimeApps = sw.Applications.Where(a =>
                 a.Name.Contains("Visual C++", StringComparison.OrdinalIgnoreCase) &&
                 a.Name.Contains("Redistributable", StringComparison.OrdinalIgnoreCase)).ToList();
-            sw.DuplicateRuntimeCount = sw.RuntimeApps.Count;
+            sw.RuntimeCount = sw.RuntimeApps.Count;
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -2370,12 +2370,12 @@ namespace DLack
                     Recommendation = "Consider uninstalling to improve system performance"
                 });
 
-            if (r.InstalledSoftware.DuplicateRuntimeCount > 6)
+            if (r.InstalledSoftware.RuntimeCount > 6)
                 issues.Add(new FlaggedIssue
                 {
                     Severity = Severity.Info,
                     Category = "Software",
-                    Description = $"{r.InstalledSoftware.DuplicateRuntimeCount} Visual C++ Redistributables installed",
+                    Description = $"{r.InstalledSoftware.RuntimeCount} Visual C++ Redistributables installed",
                     Recommendation = "Older versions may be safely removed if no legacy apps depend on them"
                 });
 

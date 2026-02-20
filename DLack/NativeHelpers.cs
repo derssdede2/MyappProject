@@ -42,12 +42,14 @@ namespace DLack
             if (!Directory.Exists(path)) return 0;
             try
             {
+                int clampedDepth = Math.Max(1, maxDepth);
                 long totalBytes = 0;
                 var options = new EnumerationOptions
                 {
                     IgnoreInaccessible = true,
-                    RecurseSubdirectories = maxDepth > 1,
-                    MaxRecursionDepth = maxDepth
+                    RecurseSubdirectories = clampedDepth > 1,
+                    MaxRecursionDepth = clampedDepth,
+                    AttributesToSkip = 0
                 };
                 foreach (var file in Directory.EnumerateFiles(path, "*", options))
                 {
